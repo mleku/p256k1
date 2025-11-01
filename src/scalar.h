@@ -13,8 +13,6 @@
 #include "scalar_low.h"
 #elif defined(SECP256K1_WIDEMUL_INT128)
 #include "scalar_4x64.h"
-#elif defined(SECP256K1_WIDEMUL_INT64)
-#include "scalar_8x32.h"
 #else
 #error "Please select wide multiplication implementation"
 #endif

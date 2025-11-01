@@ -13,7 +13,7 @@
  * objects, which represent field elements (integers modulo 2^256 - 2^32 - 977).
  *
  * The actual definition of the secp256k1_fe type depends on the chosen field
- * implementation; see the field_5x52.h and field_10x26.h files for details.
+ * implementation; see the field_5x52.h file for details.
  *
  * All secp256k1_fe objects have implicit properties that determine what
  * operations are permitted on it. These are purely a function of what
@@ -39,8 +39,6 @@
 
 #if defined(SECP256K1_WIDEMUL_INT128)
 #include "field_5x52.h"
-#elif defined(SECP256K1_WIDEMUL_INT64)
-#include "field_10x26.h"
 #else
 #error "Please select wide multiplication implementation"
 #endif

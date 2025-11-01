@@ -321,9 +321,6 @@ static SECP256K1_INLINE void secp256k1_int_cmov(int *r, const int *a, int flag) 
 /* If USE_FORCE_WIDEMUL_INT128 is set, use int128. */
 # define SECP256K1_WIDEMUL_INT128 1
 # define SECP256K1_INT128_NATIVE 1
-#elif defined(USE_FORCE_WIDEMUL_INT64)
-/* If USE_FORCE_WIDEMUL_INT64 is set, use int64. */
-# define SECP256K1_WIDEMUL_INT64 1
 #elif defined(UINT128_MAX) || defined(__SIZEOF_INT128__)
 /* If a native 128-bit integer type exists, use int128. */
 # define SECP256K1_WIDEMUL_INT128 1
@@ -340,8 +337,7 @@ static SECP256K1_INLINE void secp256k1_int_cmov(int *r, const int *a, int flag) 
 # define SECP256K1_WIDEMUL_INT128 1
 # define SECP256K1_INT128_STRUCT 1
 #else
-/* Lastly, fall back to int64 based arithmetic. */
-# define SECP256K1_WIDEMUL_INT64 1
+#error "No suitable wide multiplication implementation found. 32-bit limb support has been removed."
 #endif
 
 #ifndef __has_builtin

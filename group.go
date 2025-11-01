@@ -344,8 +344,11 @@ func (r *GroupElementJacobian) double(a *GroupElementJacobian) {
 	r.y.negate(&r.y, 2)
 }
 
-// addVar sets r = a + b (variable-time point addition)
+// addVar sets r = a + b (variable-time point addition in Jacobian coordinates)
+// This follows the C secp256k1_gej_add_var implementation exactly
+// Operations: 12 mul, 4 sqr, 11 add/negate/normalizes_to_zero
 func (r *GroupElementJacobian) addVar(a, b *GroupElementJacobian) {
+	// Handle infinity cases
 	if a.infinity {
 		*r = *b
 		return
@@ -355,63 +358,111 @@ func (r *GroupElementJacobian) addVar(a, b *GroupElementJacobian) {
 		return
 	}
 	
-	// Addition formula for Jacobian coordinates
-	// This is a simplified implementation - the full version would be more optimized
+	// Following C code exactly: secp256k1_gej_add_var
+	// z22 = b->z^2
+	// z12 = a->z^2
+	// u1 = a->x * z22
+	// u2 = b->x * z12
+	// s1 = a->y * z22 * b->z
+	// s2 = b->y * z12 * a->z
+	// h = u2 - u1
+	// i = s2 - s1
+	// If h == 0 and i == 0: double(a)
+	// If h == 0 and i != 0: infinity
+	// Otherwise: add
 	
-	// Convert to affine for simplicity (not optimal but correct)
-	var aAff, bAff, rAff GroupElementAffine
-	aAff.setGEJ(a)
-	bAff.setGEJ(b)
+	var z22, z12, u1, u2, s1, s2, h, i, h2, h3, t FieldElement
 	
-	// Check if points are equal or negatives
-	if aAff.equal(&bAff) {
-		r.double(a)
-		return
+	// z22 = b->z^2
+	z22.sqr(&b.z)
+	
+	// z12 = a->z^2
+	z12.sqr(&a.z)
+	
+	// u1 = a->x * z22
+	u1.mul(&a.x, &z22)
+	
+	// u2 = b->x * z12
+	u2.mul(&b.x, &z12)
+	
+	// s1 = a->y * z22 * b->z
+	s1.mul(&a.y, &z22)
+	s1.mul(&s1, &b.z)
+	
+	// s2 = b->y * z12 * a->z
+	s2.mul(&b.y, &z12)
+	s2.mul(&s2, &a.z)
+	
+	// h = u2 - u1
+	h.negate(&u1, 1)
+	h.add(&u2)
+	
+	// i = s2 - s1
+	i.negate(&s2, 1)
+	i.add(&s1)
+	
+	// Check if h normalizes to zero
+	if h.normalizesToZeroVar() {
+		if i.normalizesToZeroVar() {
+			// Points are equal - double
+			r.double(a)
+			return
+		} else {
+			// Points are negatives - result is infinity
+			r.setInfinity()
+			return
+		}
 	}
 	
-	var negB GroupElementAffine
-	negB.negate(&bAff)
-	if aAff.equal(&negB) {
-		r.setInfinity()
-		return
-	}
+	// General addition case
+	r.infinity = false
 	
-	// General addition in affine coordinates
-	// lambda = (y2 - y1) / (x2 - x1)
-	// x3 = lambda^2 - x1 - x2
-	// y3 = lambda*(x1 - x3) - y1
+	// t = h * b->z
+	t.mul(&h, &b.z)
 	
-	var dx, dy, lambda, x3, y3 FieldElement
+	// r->z = a->z * t
+	r.z.mul(&a.z, &t)
 	
-	// dx = x2 - x1, dy = y2 - y1
-	dx = bAff.x
-	dx.sub(&aAff.x)
-	dy = bAff.y
-	dy.sub(&aAff.y)
+	// h2 = h^2
+	h2.sqr(&h)
 	
-	// lambda = dy / dx
-	var dxInv FieldElement
-	dxInv.inv(&dx)
-	lambda.mul(&dy, &dxInv)
+	// h2 = -h2
+	h2.negate(&h2, 1)
 	
-	// x3 = lambda^2 - x1 - x2
-	x3.sqr(&lambda)
-	x3.sub(&aAff.x)
-	x3.sub(&bAff.x)
+	// h3 = h2 * h
+	h3.mul(&h2, &h)
 	
-	// y3 = lambda*(x1 - x3) - y1
-	var temp FieldElement
-	temp = aAff.x
-	temp.sub(&x3)
-	y3.mul(&lambda, &temp)
-	y3.sub(&aAff.y)
+	// t = u1 * h2
+	t.mul(&u1, &h2)
 	
-	// Set result
-	rAff.setXY(&x3, &y3)
-	r.setGE(&rAff)
+	// r->x = i^2
+	r.x.sqr(&i)
+	
+	// r->x = i^2 + h3
+	r.x.add(&h3)
+	
+	// r->x = i^2 + h3 + t
+	r.x.add(&t)
+	
+	// r->x = i^2 + h3 + 2*t
+	r.x.add(&t)
+	
+	// t = t + r->x
+	t.add(&r.x)
+	
+	// r->y = t * i
+	r.y.mul(&t, &i)
+	
+	// h3 = h3 * s1
+	h3.mul(&h3, &s1)
+	
+	// r->y = t * i + h3
+	r.y.add(&h3)
 }
 
 // addGE sets r = a + b where a is Jacobian and b is affine
+// This follows the C secp256k1_gej_add_ge_var implementation exactly
+// Operations: 8 mul, 3 sqr, 11 add/negate/normalizes_to_zero
 func (r *GroupElementJacobian) addGE(a *GroupElementJacobian, b *GroupElementAffine) {
 	if a.infinity {
 		r.setGE(b)
@@ -422,10 +473,98 @@ func (r *GroupElementJacobian) addGE(a *GroupElementJacobian, b *GroupElementAff
 		return
 	}
 	
-	// Convert b to Jacobian and use addVar
-	var bJac GroupElementJacobian
-	bJac.setGE(b)
-	r.addVar(a, &bJac)
+	// Following C code exactly: secp256k1_gej_add_ge_var
+	// z12 = a->z^2
+	// u1 = a->x
+	// u2 = b->x * z12
+	// s1 = a->y
+	// s2 = b->y * z12 * a->z
+	// h = u2 - u1
+	// i = s2 - s1
+	// If h == 0 and i == 0: double(a)
+	// If h == 0 and i != 0: infinity
+	// Otherwise: add
+	
+	var z12, u1, u2, s1, s2, h, i, h2, h3, t FieldElement
+	
+	// z12 = a->z^2
+	z12.sqr(&a.z)
+	
+	// u1 = a->x
+	u1 = a.x
+	
+	// u2 = b->x * z12
+	u2.mul(&b.x, &z12)
+	
+	// s1 = a->y
+	s1 = a.y
+	
+	// s2 = b->y * z12 * a->z
+	s2.mul(&b.y, &z12)
+	s2.mul(&s2, &a.z)
+	
+	// h = u2 - u1
+	h.negate(&u1, a.x.magnitude)
+	h.add(&u2)
+	
+	// i = s2 - s1
+	i.negate(&s2, 1)
+	i.add(&s1)
+	
+	// Check if h normalizes to zero
+	if h.normalizesToZeroVar() {
+		if i.normalizesToZeroVar() {
+			// Points are equal - double
+			r.double(a)
+			return
+		} else {
+			// Points are negatives - result is infinity
+			r.setInfinity()
+			return
+		}
+	}
+	
+	// General addition case
+	r.infinity = false
+	
+	// r->z = a->z * h
+	r.z.mul(&a.z, &h)
+	
+	// h2 = h^2
+	h2.sqr(&h)
+	
+	// h2 = -h2
+	h2.negate(&h2, 1)
+	
+	// h3 = h2 * h
+	h3.mul(&h2, &h)
+	
+	// t = u1 * h2
+	t.mul(&u1, &h2)
+	
+	// r->x = i^2
+	r.x.sqr(&i)
+	
+	// r->x = i^2 + h3
+	r.x.add(&h3)
+	
+	// r->x = i^2 + h3 + t
+	r.x.add(&t)
+	
+	// r->x = i^2 + h3 + 2*t
+	r.x.add(&t)
+	
+	// t = t + r->x
+	t.add(&r.x)
+	
+	// r->y = t * i
+	r.y.mul(&t, &i)
+	
+	// h3 = h3 * s1
+	h3.mul(&h3, &s1)
+	
+	// r->y = t * i + h3
+	r.y.add(&h3)
 }
 
 // clear clears a group element to prevent leaking sensitive information

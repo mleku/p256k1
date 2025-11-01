@@ -1,0 +1,274 @@
+package p256k1
+
+import (
+	"errors"
+	"hash"
+	"unsafe"
+
+	"github.com/minio/sha256-simd"
+)
+
+// SHA256 represents a SHA-256 hash context
+type SHA256 struct {
+	hasher hash.Hash
+}
+
+// NewSHA256 creates a new SHA-256 hash context
+func NewSHA256() *SHA256 {
+	h := &SHA256{}
+	h.hasher = sha256.New()
+	return h
+}
+
+// Write writes data to the hash
+func (h *SHA256) Write(data []byte) {
+	h.hasher.Write(data)
+}
+
+// Sum finalizes the hash and returns the 32-byte result
+func (h *SHA256) Sum(out []byte) []byte {
+	if out == nil {
+		out = make([]byte, 32)
+	}
+	copy(out, h.hasher.Sum(nil))
+	return out
+}
+
+// Finalize finalizes the hash and writes the result to out32 (must be 32 bytes)
+func (h *SHA256) Finalize(out32 []byte) {
+	if len(out32) != 32 {
+		panic("output buffer must be 32 bytes")
+	}
+	sum := h.hasher.Sum(nil)
+	copy(out32, sum)
+}
+
+// Clear clears the hash context to prevent leaking sensitive information
+func (h *SHA256) Clear() {
+	memclear(unsafe.Pointer(h), unsafe.Sizeof(*h))
+}
+
+// HMACSHA256 represents an HMAC-SHA256 context
+type HMACSHA256 struct {
+	inner, outer SHA256
+}
+
+// NewHMACSHA256 creates a new HMAC-SHA256 context with the given key
+func NewHMACSHA256(key []byte) *HMACSHA256 {
+	h := &HMACSHA256{}
+	
+	// Prepare key: if keylen > 64, hash it first
+	var rkey [64]byte
+	if len(key) <= 64 {
+		copy(rkey[:], key)
+		// Zero pad the rest
+		for i := len(key); i < 64; i++ {
+			rkey[i] = 0
+		}
+	} else {
+		// Hash the key if it's too long
+		hasher := sha256.New()
+		hasher.Write(key)
+		sum := hasher.Sum(nil)
+		copy(rkey[:32], sum)
+		// Zero pad the rest
+		for i := 32; i < 64; i++ {
+			rkey[i] = 0
+		}
+	}
+
+	// Initialize outer hash with key XOR 0x5c
+	h.outer = SHA256{hasher: sha256.New()}
+	for i := 0; i < 64; i++ {
+		rkey[i] ^= 0x5c
+	}
+	h.outer.hasher.Write(rkey[:])
+
+	// Initialize inner hash with key XOR 0x36
+	h.inner = SHA256{hasher: sha256.New()}
+	for i := 0; i < 64; i++ {
+		rkey[i] ^= 0x5c ^ 0x36
+	}
+	h.inner.hasher.Write(rkey[:])
+
+	// Clear sensitive key material
+	memclear(unsafe.Pointer(&rkey), unsafe.Sizeof(rkey))
+	return h
+}
+
+// Write writes data to the inner hash
+func (h *HMACSHA256) Write(data []byte) {
+	h.inner.Write(data)
+}
+
+// Finalize finalizes the HMAC and writes the result to out32 (must be 32 bytes)
+func (h *HMACSHA256) Finalize(out32 []byte) {
+	if len(out32) != 32 {
+		panic("output buffer must be 32 bytes")
+	}
+	
+	// Finalize inner hash
+	var temp [32]byte
+	h.inner.Finalize(temp[:])
+	
+	// Feed inner hash result to outer hash
+	h.outer.Write(temp[:])
+	
+	// Finalize outer hash
+	h.outer.Finalize(out32)
+	
+	// Clear temp
+	memclear(unsafe.Pointer(&temp), unsafe.Sizeof(temp))
+}
+
+// Clear clears the HMAC context
+func (h *HMACSHA256) Clear() {
+	h.inner.Clear()
+	h.outer.Clear()
+	memclear(unsafe.Pointer(h), unsafe.Sizeof(*h))
+}
+
+// RFC6979HMACSHA256 implements RFC 6979 deterministic nonce generation
+type RFC6979HMACSHA256 struct {
+	v [32]byte
+	k [32]byte
+	retry int
+}
+
+// NewRFC6979HMACSHA256 initializes a new RFC6979 HMAC-SHA256 context
+func NewRFC6979HMACSHA256(key []byte) *RFC6979HMACSHA256 {
+	rng := &RFC6979HMACSHA256{}
+	
+	// RFC6979 3.2.b: V = 0x01 0x01 0x01 ... 0x01 (32 bytes)
+	for i := 0; i < 32; i++ {
+		rng.v[i] = 0x01
+	}
+	
+	// RFC6979 3.2.c: K = 0x00 0x00 0x00 ... 0x00 (32 bytes)
+	for i := 0; i < 32; i++ {
+		rng.k[i] = 0x00
+	}
+	
+	// RFC6979 3.2.d: K = HMAC_K(V || 0x00 || key)
+	hmac := NewHMACSHA256(rng.k[:])
+	hmac.Write(rng.v[:])
+	hmac.Write([]byte{0x00})
+	hmac.Write(key)
+	hmac.Finalize(rng.k[:])
+	hmac.Clear()
+	
+	// V = HMAC_K(V)
+	hmac = NewHMACSHA256(rng.k[:])
+	hmac.Write(rng.v[:])
+	hmac.Finalize(rng.v[:])
+	hmac.Clear()
+	
+	// RFC6979 3.2.f: K = HMAC_K(V || 0x01 || key)
+	hmac = NewHMACSHA256(rng.k[:])
+	hmac.Write(rng.v[:])
+	hmac.Write([]byte{0x01})
+	hmac.Write(key)
+	hmac.Finalize(rng.k[:])
+	hmac.Clear()
+	
+	// V = HMAC_K(V)
+	hmac = NewHMACSHA256(rng.k[:])
+	hmac.Write(rng.v[:])
+	hmac.Finalize(rng.v[:])
+	hmac.Clear()
+	
+	rng.retry = 0
+	return rng
+}
+
+// Generate generates output bytes using RFC6979
+func (rng *RFC6979HMACSHA256) Generate(out []byte) {
+	// RFC6979 3.2.h: If retry, update K and V
+	if rng.retry != 0 {
+		hmac := NewHMACSHA256(rng.k[:])
+		hmac.Write(rng.v[:])
+		hmac.Write([]byte{0x00})
+		hmac.Finalize(rng.k[:])
+		hmac.Clear()
+		
+		hmac = NewHMACSHA256(rng.k[:])
+		hmac.Write(rng.v[:])
+		hmac.Finalize(rng.v[:])
+		hmac.Clear()
+	}
+	
+	// Generate output bytes
+	outlen := len(out)
+	for outlen > 0 {
+		hmac := NewHMACSHA256(rng.k[:])
+		hmac.Write(rng.v[:])
+		hmac.Finalize(rng.v[:])
+		hmac.Clear()
+		
+		now := outlen
+		if now > 32 {
+			now = 32
+		}
+		copy(out, rng.v[:now])
+		out = out[now:]
+		outlen -= now
+	}
+	
+	rng.retry = 1
+}
+
+// Finalize finalizes the RFC6979 context
+func (rng *RFC6979HMACSHA256) Finalize() {
+	// Nothing to do, but matches C API
+}
+
+// Clear clears the RFC6979 context
+func (rng *RFC6979HMACSHA256) Clear() {
+	memclear(unsafe.Pointer(rng), unsafe.Sizeof(*rng))
+}
+
+// TaggedHash computes SHA256(SHA256(tag) || SHA256(tag) || data)
+// This is used in BIP-340 for Schnorr signatures
+func TaggedHash(tag []byte, data []byte) [32]byte {
+	var result [32]byte
+	
+	// First hash: SHA256(tag)
+	h := NewSHA256()
+	h.Write(tag)
+	h.Finalize(result[:])
+	
+	// Second hash: SHA256(SHA256(tag) || SHA256(tag) || data)
+	h = NewSHA256()
+	h.Write(result[:]) // SHA256(tag)
+	h.Write(result[:]) // SHA256(tag) again
+	h.Write(data)
+	h.Finalize(result[:])
+	h.Clear()
+	
+	return result
+}
+
+// HashToScalar converts a 32-byte hash to a scalar value
+func HashToScalar(hash []byte) (*Scalar, error) {
+	if len(hash) != 32 {
+		return nil, errors.New("hash must be 32 bytes")
+	}
+	
+	var scalar Scalar
+	scalar.setB32(hash)
+	return &scalar, nil
+}
+
+// HashToField converts a 32-byte hash to a field element
+func HashToField(hash []byte) (*FieldElement, error) {
+	if len(hash) != 32 {
+		return nil, errors.New("hash must be 32 bytes")
+	}
+	
+	var field FieldElement
+	if err := field.setB32(hash); err != nil {
+		return nil, err
+	}
+	return &field, nil
+}
+

@@ -1,0 +1,24 @@
+goos: linux
+goarch: amd64
+pkg: p256k1.mleku.dev
+cpu: AMD Ryzen 5 PRO 4650G with Radeon Graphics
+BenchmarkContextCreate-12                  	284636085	         8.524 ns/op	       1 B/op	       1 allocs/op
+BenchmarkContextRandomize-12               	947889351	         2.545 ns/op	       0 B/op	       0 allocs/op
+BenchmarkECDSASign-12                      	     469	   5039503 ns/op	    2226 B/op	      39 allocs/op
+BenchmarkECDSAVerify-12                    	     240	   9790878 ns/op	       0 B/op	       0 allocs/op
+BenchmarkECDSASignCompact-12               	     458	   5143887 ns/op	    2290 B/op	      40 allocs/op
+BenchmarkECDSAVerifyCompact-12             	     247	  10349143 ns/op	       0 B/op	       0 allocs/op
+BenchmarkECSeckeyGenerate-12               	 4326594	       548.4 ns/op	      32 B/op	       1 allocs/op
+BenchmarkECKeyPairGenerate-12              	     474	   5109935 ns/op	      96 B/op	       2 allocs/op
+BenchmarkSHA256-12                         	15423699	       150.4 ns/op	     144 B/op	       2 allocs/op
+BenchmarkHMACSHA256-12                     	 4691949	       517.0 ns/op	     416 B/op	       7 allocs/op
+BenchmarkRFC6979-12                        	  780189	      2840 ns/op	    2162 B/op	      38 allocs/op
+BenchmarkTaggedHash-12                     	 7720662	       309.7 ns/op	     320 B/op	       5 allocs/op
+BenchmarkEcmultGen-12                      	    1899	   1273725 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGroupDouble-12                    	11767611	       203.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGroupAdd-12                       	   61155	     38667 ns/op	       0 B/op	       0 allocs/op
+BenchmarkECPubkeyCreate-12                 	    1878	   1259578 ns/op	       0 B/op	       0 allocs/op
+BenchmarkECPubkeySerializeCompressed-12    	36482311	        64.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkECPubkeyParse-12                  	  357204	      6595 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	p256k1.mleku.dev	50.269s

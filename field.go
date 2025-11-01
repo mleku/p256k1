@@ -219,6 +219,16 @@ func (r *FieldElement) isOdd() bool {
 	return r.n[0]&1 == 1
 }
 
+// normalizesToZeroVar checks if the field element normalizes to zero
+// This is a variable-time check (not constant-time)
+// A field element normalizes to zero if all limbs are zero or if it equals the modulus
+func (r *FieldElement) normalizesToZeroVar() bool {
+	var t FieldElement
+	t = *r
+	t.normalize()
+	return t.isZero()
+}
+
 // equal returns true if two field elements are equal
 func (r *FieldElement) equal(a *FieldElement) bool {
 	// Both must be normalized for comparison

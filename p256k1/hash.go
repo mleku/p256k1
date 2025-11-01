@@ -2,6 +2,7 @@ package p256k1
 
 import (
 	"hash"
+
 	"github.com/minio/sha256-simd"
 )
 
@@ -26,7 +27,7 @@ func (h *SHA256) Initialize() {
 func (h *SHA256) InitializeTagged(tag []byte) {
 	// Compute SHA256(tag)
 	tagHash := sha256.Sum256(tag)
-	
+
 	// Initialize with SHA256(tag) || SHA256(tag)
 	h.hasher.Reset()
 	h.hasher.Write(tagHash[:])
@@ -43,7 +44,7 @@ func (h *SHA256) Finalize(output []byte) {
 	if len(output) != 32 {
 		panic("SHA-256 output must be 32 bytes")
 	}
-	
+
 	result := h.hasher.Sum(nil)
 	copy(output, result[:])
 }
@@ -58,16 +59,16 @@ func TaggedSHA256(output []byte, tag []byte, msg []byte) {
 	if len(output) != 32 {
 		panic("output must be 32 bytes")
 	}
-	
+
 	// Compute SHA256(tag)
 	tagHash := sha256.Sum256(tag)
-	
+
 	// Compute SHA256(SHA256(tag) || SHA256(tag) || msg)
 	hasher := sha256.New()
 	hasher.Write(tagHash[:])
 	hasher.Write(tagHash[:])
 	hasher.Write(msg)
-	
+
 	result := hasher.Sum(nil)
 	copy(output, result)
 }
@@ -77,7 +78,7 @@ func SHA256Simple(output []byte, input []byte) {
 	if len(output) != 32 {
 		panic("output must be 32 bytes")
 	}
-	
+
 	result := sha256.Sum256(input)
 	copy(output, result[:])
 }
@@ -100,24 +101,24 @@ func (h *HMACSHA256) Initialize(key []byte) {
 	for i := range h.v {
 		h.v[i] = 0x01
 	}
-	
+
 	// Initialize K = 0x00 0x00 0x00 ... 0x00
 	for i := range h.k {
 		h.k[i] = 0x00
 	}
-	
+
 	// K = HMAC_K(V || 0x00 || key)
 	h.updateK(0x00, key)
-	
+
 	// V = HMAC_K(V)
 	h.updateV()
-	
+
 	// K = HMAC_K(V || 0x01 || key)
 	h.updateK(0x01, key)
-	
+
 	// V = HMAC_K(V)
 	h.updateV()
-	
+
 	h.init = true
 }
 
@@ -145,14 +146,14 @@ func (h *HMACSHA256) Generate(output []byte) {
 	if !h.init {
 		panic("HMAC not initialized")
 	}
-	
+
 	outputLen := len(output)
 	generated := 0
-	
+
 	for generated < outputLen {
 		// V = HMAC_K(V)
 		h.updateV()
-		
+
 		// Copy V to output
 		toCopy := 32
 		if generated+toCopy > outputLen {
@@ -194,7 +195,7 @@ func NewHMACWithKey(key []byte) *HMAC {
 		outer:  NewSHA256(),
 		keyLen: len(key),
 	}
-	
+
 	// Prepare key
 	var k [64]byte
 	if len(key) > 64 {
@@ -206,22 +207,22 @@ func NewHMACWithKey(key []byte) *HMAC {
 	} else {
 		copy(k[:], key)
 	}
-	
+
 	// Create inner and outer keys
 	var ikey, okey [64]byte
 	for i := 0; i < 64; i++ {
 		ikey[i] = k[i] ^ 0x36
 		okey[i] = k[i] ^ 0x5c
 	}
-	
+
 	// Initialize inner hash with inner key
 	h.inner.Initialize()
 	h.inner.Write(ikey[:])
-	
+
 	// Initialize outer hash with outer key
 	h.outer.Initialize()
 	h.outer.Write(okey[:])
-	
+
 	return h
 }
 
@@ -235,11 +236,11 @@ func (h *HMAC) Finalize(output []byte) {
 	if len(output) != 32 {
 		panic("HMAC output must be 32 bytes")
 	}
-	
+
 	// Get inner hash result
 	var innerResult [32]byte
 	h.inner.Finalize(innerResult[:])
-	
+
 	// Complete outer hash
 	h.outer.Write(innerResult[:])
 	h.outer.Finalize(output)

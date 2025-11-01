@@ -1,7 +1,5 @@
 package p256k1
 
-import ()
-
 // PublicKey represents a parsed and valid public key (64 bytes)
 type PublicKey struct {
 	data [64]byte
@@ -601,36 +599,36 @@ func rfc6979NonceFunction(nonce32 []byte, msg32 []byte, key32 []byte, algo16 []b
 	if len(nonce32) != 32 || len(msg32) != 32 || len(key32) != 32 {
 		return false
 	}
-	
+
 	// Build input data for HMAC: key || msg || [extra_data] || [algo]
 	var keyData []byte
 	keyData = append(keyData, key32...)
 	keyData = append(keyData, msg32...)
-	
+
 	// Add extra entropy if provided
 	if data != nil {
 		if extraBytes, ok := data.([]byte); ok && len(extraBytes) == 32 {
 			keyData = append(keyData, extraBytes...)
 		}
 	}
-	
+
 	// Add algorithm identifier if provided
 	if algo16 != nil && len(algo16) == 16 {
 		keyData = append(keyData, algo16...)
 	}
-	
+
 	// Initialize RFC 6979 HMAC
 	rng := NewRFC6979HMACSHA256()
 	rng.Initialize(keyData)
-	
+
 	// Generate nonces until we get the right attempt
 	var tempNonce [32]byte
 	for i := uint(0); i <= attempt; i++ {
 		rng.Generate(tempNonce[:])
 	}
-	
+
 	copy(nonce32, tempNonce[:])
 	rng.Clear()
-	
+
 	return true
 }

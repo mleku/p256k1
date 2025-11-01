@@ -55,76 +55,69 @@ var (
 		magnitude:  0,
 		normalized: true,
 	}
-)
 
-// NewFieldElement creates a new field element
-func NewFieldElement() *FieldElement {
-	return &FieldElement{
-		n:          [5]uint64{0, 0, 0, 0, 0},
-		magnitude:  0,
+	// Beta constant used in endomorphism optimization
+	FieldElementBeta = FieldElement{
+		n: [5]uint64{
+			0x719501ee7ae96a2b, 0x9cf04975657c0710, 0x12f58995ac3434e9,
+			0xc1396c286e64479e, 0x0000000000000000,
+		},
+		magnitude:  1,
 		normalized: true,
 	}
+)
+
+// NewFieldElement creates a new field element from a 32-byte big-endian array
+func NewFieldElement(b32 []byte) (r *FieldElement, err error) {
+	if len(b32) != 32 {
+		return nil, errors.New("input must be 32 bytes")
+	}
+
+	r = &FieldElement{}
+	r.setB32(b32)
+	return r, nil
 }
 
-// setB32 sets a field element from a 32-byte big-endian array
-func (r *FieldElement) setB32(b []byte) error {
-	if len(b) != 32 {
-		return errors.New("field element byte array must be 32 bytes")
-	}
-
-	// Convert from big-endian bytes to 5x52 limbs
-	// First convert to 4x64 limbs then to 5x52
-	var d [4]uint64
-	for i := 0; i < 4; i++ {
-		d[i] = uint64(b[31-8*i]) | uint64(b[30-8*i])<<8 | uint64(b[29-8*i])<<16 | uint64(b[28-8*i])<<24 |
-			uint64(b[27-8*i])<<32 | uint64(b[26-8*i])<<40 | uint64(b[25-8*i])<<48 | uint64(b[24-8*i])<<56
-	}
-
-	// Convert from 4x64 to 5x52
-	r.n[0] = d[0] & limb0Max
-	r.n[1] = ((d[0] >> 52) | (d[1] << 12)) & limb0Max
-	r.n[2] = ((d[1] >> 40) | (d[2] << 24)) & limb0Max
-	r.n[3] = ((d[2] >> 28) | (d[3] << 36)) & limb0Max
-	r.n[4] = (d[3] >> 16) & limb4Max
+// setB32 sets a field element from a 32-byte big-endian array, reducing modulo p
+func (r *FieldElement) setB32(a []byte) {
+	// Convert from big-endian bytes to limbs
+	r.n[0] = readBE64(a[24:32]) & limb0Max
+	r.n[1] = (readBE64(a[16:24]) << 12) | (readBE64(a[24:32]) >> 52)
+	r.n[1] &= limb0Max
+	r.n[2] = (readBE64(a[8:16]) << 24) | (readBE64(a[16:24]) >> 40)
+	r.n[2] &= limb0Max
+	r.n[3] = (readBE64(a[0:8]) << 36) | (readBE64(a[8:16]) >> 28)
+	r.n[3] &= limb0Max
+	r.n[4] = readBE64(a[0:8]) >> 16
 
 	r.magnitude = 1
 	r.normalized = false
 
-	return nil
-}
-
-// getB32 converts a field element to a 32-byte big-endian array
-func (r *FieldElement) getB32(b []byte) {
-	if len(b) != 32 {
-		panic("field element byte array must be 32 bytes")
-	}
-
-	// Normalize first
-	var normalized FieldElement
-	normalized = *r
-	normalized.normalize()
-
-	// Convert from 5x52 to 4x64 limbs
-	var d [4]uint64
-	d[0] = normalized.n[0] | (normalized.n[1] << 52)
-	d[1] = (normalized.n[1] >> 12) | (normalized.n[2] << 40)
-	d[2] = (normalized.n[2] >> 24) | (normalized.n[3] << 28)
-	d[3] = (normalized.n[3] >> 36) | (normalized.n[4] << 16)
-
-	// Convert to big-endian bytes
-	for i := 0; i < 4; i++ {
-		b[31-8*i] = byte(d[i])
-		b[30-8*i] = byte(d[i] >> 8)
-		b[29-8*i] = byte(d[i] >> 16)
-		b[28-8*i] = byte(d[i] >> 24)
-		b[27-8*i] = byte(d[i] >> 32)
-		b[26-8*i] = byte(d[i] >> 40)
-		b[25-8*i] = byte(d[i] >> 48)
-		b[24-8*i] = byte(d[i] >> 56)
+	// Reduce if necessary
+	if r.n[4] == limb4Max && r.n[3] == limb0Max && r.n[2] == limb0Max &&
+		r.n[1] == limb0Max && r.n[0] >= fieldModulusLimb0 {
+		r.reduce()
 	}
 }
 
-// normalize normalizes a field element to its canonical representation
+// getB32 converts a normalized field element to a 32-byte big-endian array
+func (r *FieldElement) getB32(b32 []byte) {
+	if len(b32) != 32 {
+		panic("output buffer must be 32 bytes")
+	}
+
+	if !r.normalized {
+		panic("field element must be normalized")
+	}
+
+	// Convert from limbs to big-endian bytes
+	writeBE64(b32[0:8], (r.n[4]<<16)|(r.n[3]>>36))
+	writeBE64(b32[8:16], (r.n[3]<<28)|(r.n[2]>>24))
+	writeBE64(b32[16:24], (r.n[2]<<40)|(r.n[1]>>12))
+	writeBE64(b32[24:32], (r.n[1]<<52)|r.n[0])
+}
+
+// normalize normalizes a field element to have magnitude 1 and be fully reduced
 func (r *FieldElement) normalize() {
 	t0, t1, t2, t3, t4 := r.n[0], r.n[1], r.n[2], r.n[3], r.n[4]
 
@@ -312,7 +305,7 @@ func (r *FieldElement) mulInt(a int) {
 
 // cmov conditionally moves a field element. If flag is true, r = a; otherwise r is unchanged.
 func (r *FieldElement) cmov(a *FieldElement, flag int) {
-	mask := uint64(-(int64(flag) & 1))
+	mask := uint64(-flag)
 	r.n[0] ^= mask & (r.n[0] ^ a.n[0])
 	r.n[1] ^= mask & (r.n[1] ^ a.n[1])
 	r.n[2] ^= mask & (r.n[2] ^ a.n[2])
@@ -328,35 +321,34 @@ func (r *FieldElement) cmov(a *FieldElement, flag int) {
 
 // toStorage converts a field element to storage format
 func (r *FieldElement) toStorage(s *FieldElementStorage) {
-	// Normalize first
-	var normalized FieldElement
-	normalized = *r
-	normalized.normalize()
+	if !r.normalized {
+		panic("field element must be normalized")
+	}
 
-	// Convert from 5x52 to 4x64
-	s.n[0] = normalized.n[0] | (normalized.n[1] << 52)
-	s.n[1] = (normalized.n[1] >> 12) | (normalized.n[2] << 40)
-	s.n[2] = (normalized.n[2] >> 24) | (normalized.n[3] << 28)
-	s.n[3] = (normalized.n[3] >> 36) | (normalized.n[4] << 16)
+	// Convert from 5x52 to 4x64 representation
+	s.n[0] = r.n[0] | (r.n[1] << 52)
+	s.n[1] = (r.n[1] >> 12) | (r.n[2] << 40)
+	s.n[2] = (r.n[2] >> 24) | (r.n[3] << 28)
+	s.n[3] = (r.n[3] >> 36) | (r.n[4] << 16)
 }
 
 // fromStorage converts from storage format to field element
 func (r *FieldElement) fromStorage(s *FieldElementStorage) {
-	// Convert from 4x64 to 5x52
+	// Convert from 4x64 to 5x52 representation
 	r.n[0] = s.n[0] & limb0Max
 	r.n[1] = ((s.n[0] >> 52) | (s.n[1] << 12)) & limb0Max
 	r.n[2] = ((s.n[1] >> 40) | (s.n[2] << 24)) & limb0Max
 	r.n[3] = ((s.n[2] >> 28) | (s.n[3] << 36)) & limb0Max
-	r.n[4] = (s.n[3] >> 16) & limb4Max
+	r.n[4] = s.n[3] >> 16
 
 	r.magnitude = 1
-	r.normalized = false
+	r.normalized = true
 }
 
-// memclear clears memory to prevent leaking sensitive information
-func memclear(ptr unsafe.Pointer, n uintptr) {
-	// Use a volatile write to prevent the compiler from optimizing away the clear
-	for i := uintptr(0); i < n; i++ {
-		*(*byte)(unsafe.Pointer(uintptr(ptr) + i)) = 0
+// Helper function for conditional assignment
+func conditionalInt(cond bool, a, b int) int {
+	if cond {
+		return a
 	}
+	return b
 }

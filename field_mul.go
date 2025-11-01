@@ -47,6 +47,29 @@ func (r *FieldElement) mul(a, b *FieldElement) {
 	r.reduceFromWide(t)
 }
 
+// mulSimple is a simplified multiplication that may not be constant-time
+func (r *FieldElement) mulSimple(a, b *FieldElement) {
+	// Convert to big integers for multiplication
+	var aVal, bVal, pVal [5]uint64
+	copy(aVal[:], a.n[:])
+	copy(bVal[:], b.n[:])
+
+	// Field modulus as limbs
+	pVal[0] = fieldModulusLimb0
+	pVal[1] = fieldModulusLimb1
+	pVal[2] = fieldModulusLimb2
+	pVal[3] = fieldModulusLimb3
+	pVal[4] = fieldModulusLimb4
+
+	// Perform multiplication and reduction
+	// This is a placeholder - real implementation needs proper big integer arithmetic
+	result := r.mulAndReduce(aVal, bVal, pVal)
+	copy(r.n[:], result[:])
+
+	r.magnitude = 1
+	r.normalized = false
+}
+
 // reduceFromWide reduces a 520-bit (10 limb) value modulo the field prime
 func (r *FieldElement) reduceFromWide(t [10]uint64) {
 	// The field prime is p = 2^256 - 2^32 - 977 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
@@ -143,6 +166,24 @@ func (r *FieldElement) reduceFromWide(t [10]uint64) {
 	   r.n[1] == limb0Max && r.n[0] >= fieldModulusLimb0 {
 		r.reduce()
 	}
+}
+
+// mulAndReduce performs multiplication and modular reduction
+func (r *FieldElement) mulAndReduce(a, b, p [5]uint64) [5]uint64 {
+	// This function is deprecated - use mul() instead
+	var fa, fb FieldElement
+	copy(fa.n[:], a[:])
+	copy(fb.n[:], b[:])
+	fa.magnitude = 1
+	fb.magnitude = 1
+	fa.normalized = false
+	fb.normalized = false
+	
+	r.mul(&fa, &fb)
+	
+	var result [5]uint64
+	copy(result[:], r.n[:])
+	return result
 }
 
 // sqr squares a field element: r = a^2

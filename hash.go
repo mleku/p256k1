@@ -1,9 +1,8 @@
 package p256k1
 
 import (
+	"crypto/sha256"
 	"hash"
-
-	"github.com/minio/sha256-simd"
 )
 
 // SHA256 represents a SHA-256 hash context

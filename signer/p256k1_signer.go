@@ -76,13 +76,15 @@ func (s *P256K1Signer) InitSec(sec []byte) error {
 		return err
 	}
 
-	// If parity is 1 (odd Y), negate the secret key
+	// If parity is 1 (odd Y), negate the secret key and recompute public key
+	// With windowed optimization, this is now much faster than before
 	if parity == 1 {
 		seckey := kp.Seckey()
 		if !p256k1.ECSeckeyNegate(seckey) {
 			return errors.New("failed to negate secret key")
 		}
 		// Recreate keypair with negated secret key
+		// This is now optimized with windowed precomputed tables
 		kp, err = p256k1.KeyPairCreate(seckey)
 		if err != nil {
 			return err

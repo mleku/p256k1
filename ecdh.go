@@ -47,6 +47,85 @@ func EcmultConst(r *GroupElementJacobian, a *GroupElementAffine, q *Scalar) {
 	}
 }
 
+// ecmultWindowedVar computes r = q * a using optimized windowed multiplication (variable-time)
+// Uses a window size of 5 bits (32 precomputed multiples)
+// Optimized for verification: efficient table building using Jacobian coordinates
+func ecmultWindowedVar(r *GroupElementJacobian, a *GroupElementAffine, q *Scalar) {
+	if a.isInfinity() {
+		r.setInfinity()
+		return
+	}
+	
+	if q.isZero() {
+		r.setInfinity()
+		return
+	}
+	
+	const windowSize = 5
+	const tableSize = 1 << windowSize // 32
+	
+	// Convert point to Jacobian once
+	var aJac GroupElementJacobian
+	aJac.setGE(a)
+	
+	// Build table efficiently using Jacobian coordinates, only convert to affine at end
+	// Store odd multiples in Jacobian form to avoid frequent conversions
+	var tableJac [tableSize]GroupElementJacobian
+	tableJac[0].setInfinity()
+	tableJac[1] = aJac
+	
+	// Build odd multiples efficiently: tableJac[2*i+1] = (2*i+1) * a
+	// Start with 3*a = a + 2*a
+	var twoA GroupElementJacobian
+	twoA.double(&aJac)
+	
+	// Build table: tableJac[i] = tableJac[i-2] + 2*a for odd i
+	for i := 3; i < tableSize; i += 2 {
+		tableJac[i].addVar(&tableJac[i-2], &twoA)
+	}
+	
+	// Build even multiples: tableJac[2*i] = 2 * tableJac[i]
+	for i := 1; i < tableSize/2; i++ {
+		tableJac[2*i].double(&tableJac[i])
+	}
+	
+	// Process scalar in windows of 5 bits from MSB to LSB
+	r.setInfinity()
+	numWindows := (256 + windowSize - 1) / windowSize // Ceiling division
+	
+	for window := 0; window < numWindows; window++ {
+		// Calculate bit offset for this window (MSB first)
+		bitOffset := 255 - window*windowSize
+		if bitOffset < 0 {
+			break
+		}
+		
+		// Extract window bits
+		actualWindowSize := windowSize
+		if bitOffset < windowSize-1 {
+			actualWindowSize = bitOffset + 1
+		}
+		
+		windowBits := q.getBits(uint(bitOffset-actualWindowSize+1), uint(actualWindowSize))
+		
+		// Double result windowSize times (once per bit position in window)
+		if !r.isInfinity() {
+			for j := 0; j < actualWindowSize; j++ {
+				r.double(r)
+			}
+		}
+		
+		// Add precomputed point if window is non-zero
+		if windowBits != 0 && windowBits < tableSize {
+			if r.isInfinity() {
+				*r = tableJac[windowBits]
+			} else {
+				r.addVar(r, &tableJac[windowBits])
+			}
+		}
+	}
+}
+
 // Ecmult computes r = q * a (variable-time, optimized)
 // This is a simplified implementation - can be optimized with windowing later
 func Ecmult(r *GroupElementJacobian, a *GroupElementJacobian, q *Scalar) {
@@ -60,27 +139,12 @@ func Ecmult(r *GroupElementJacobian, a *GroupElementJacobian, q *Scalar) {
 		return
 	}
 	
-	// Simple binary method for now
-	r.setInfinity()
-	var base GroupElementJacobian
-	base = *a
+	// Convert to affine for windowed multiplication
+	var aAff GroupElementAffine
+	aAff.setGEJ(a)
 	
-	// Process bits from MSB to LSB
-	for i := 0; i < 256; i++ {
-		if i > 0 {
-			r.double(r)
-		}
-		
-		// Get bit i (from MSB)
-		bit := q.getBits(uint(255-i), 1)
-		if bit != 0 {
-			if r.isInfinity() {
-				*r = base
-			} else {
-				r.addVar(r, &base)
-			}
-		}
-	}
+	// Use optimized windowed multiplication
+	ecmultWindowedVar(r, &aAff, q)
 }
 
 // ECDHHashFunction is a function type for hashing ECDH shared secrets
@@ -308,4 +372,5 @@ func ECDHXOnly(output []byte, pubkey *PublicKey, seckey []byte) error {
 	
 	return nil
 }
+
 

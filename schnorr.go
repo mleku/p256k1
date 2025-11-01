@@ -246,8 +246,12 @@ func SchnorrVerify(sig64 []byte, msg32 []byte, xonlyPubkey *XOnlyPubkey) bool {
 		return false
 	}
 
+	// Use optimized variable-time multiplication for verification
+	// (constant-time is not required for public verification operations)
+	var pkJac GroupElementJacobian
+	pkJac.setGE(&pk)
 	var eP GroupElementJacobian
-	EcmultConst(&eP, &pk, &e)
+	Ecmult(&eP, &pkJac, &e)
 
 	// Negate eP
 	var negEP GroupElementJacobian

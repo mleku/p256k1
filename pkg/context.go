@@ -16,7 +16,7 @@ type Context struct {
 
 // EcmultGenContext holds precomputed data for scalar multiplication with the generator
 type EcmultGenContext struct {
-	built      bool
+	built bool
 	// Precomputed table: prec[i][j] = (j+1) * 2^(i*4) * G
 	prec       [64][16]GroupElementAffine
 	blindPoint GroupElementAffine // Blinding point for side-channel protection
@@ -147,11 +147,11 @@ func (ctx *EcmultGenContext) build() error {
 	if ctx.built {
 		return nil
 	}
-	
+
 	// Initialize with proper generator coordinates
 	var generator GroupElementAffine
 	var gx, gy [32]byte
-	
+
 	// Generator X coordinate
 	gx = [32]byte{
 		0x79, 0xBE, 0x66, 0x7E, 0xF9, 0xDC, 0xBB, 0xAC,
@@ -166,32 +166,32 @@ func (ctx *EcmultGenContext) build() error {
 		0xFD, 0x17, 0xB4, 0x48, 0xA6, 0x85, 0x54, 0x19,
 		0x9C, 0x47, 0xD0, 0x8F, 0xFB, 0x10, 0xD4, 0xB8,
 	}
-	
+
 	generator.x.setB32(gx[:])
 	generator.y.setB32(gy[:])
 	generator.x.normalize()
 	generator.y.normalize()
 	generator.infinity = false
-	
+
 	// Build precomputed table for optimized generator multiplication
 	current := generator
-	
+
 	// For each window position (64 windows of 4 bits each)
 	for i := 0; i < 64; i++ {
 		// First entry is point at infinity (0 * current)
 		ctx.prec[i][0] = InfinityAffine
-		
+
 		// Remaining entries are multiples: 1*current, 2*current, ..., 15*current
 		ctx.prec[i][1] = current
-		
+
 		var temp GroupElementJacobian
 		temp.setGE(&current)
-		
+
 		for j := 2; j < 16; j++ {
 			temp.addGE(&temp, &current)
 			ctx.prec[i][j].setGEJ(&temp)
 		}
-		
+
 		// Move to next window: current = 2^4 * current = 16 * current
 		temp.setGE(&current)
 		for k := 0; k < 4; k++ {
@@ -199,7 +199,7 @@ func (ctx *EcmultGenContext) build() error {
 		}
 		current.setGEJ(&temp)
 	}
-	
+
 	// Initialize blinding point to infinity
 	ctx.blindPoint = InfinityAffine
 	ctx.built = true

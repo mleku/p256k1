@@ -1,58 +1,60 @@
 package p256k1
 
-// GroupElementAffine represents a group element in affine coordinates (x, y)
+// No imports needed for basic group operations
+
+// GroupElementAffine represents a point on the secp256k1 curve in affine coordinates (x, y)
 type GroupElementAffine struct {
-	x        FieldElement
-	y        FieldElement
-	infinity bool // whether this represents the point at infinity
+	x, y     FieldElement
+	infinity bool
 }
 
-// GroupElementJacobian represents a group element in Jacobian coordinates (x, y, z)
-// where the actual coordinates are (x/z^2, y/z^3)
+// GroupElementJacobian represents a point on the secp256k1 curve in Jacobian coordinates (x, y, z)
+// where the affine coordinates are (x/z^2, y/z^3)
 type GroupElementJacobian struct {
-	x        FieldElement
-	y        FieldElement
-	z        FieldElement
-	infinity bool // whether this represents the point at infinity
+	x, y, z  FieldElement
+	infinity bool
 }
 
-// GroupElementStorage represents a group element in storage format
+// GroupElementStorage represents a point in storage format (compressed coordinates)
 type GroupElementStorage struct {
-	x FieldElementStorage
-	y FieldElementStorage
+	x [32]byte
+	y [32]byte
 }
 
-// Group element constants
+// Generator point G for secp256k1 curve
 var (
-	// Generator point G of secp256k1 (simplified initialization)
-	GeneratorAffine = GroupElementAffine{
-		x: FieldElement{
-			n:          [5]uint64{1, 0, 0, 0, 0}, // Placeholder - will be set properly
-			magnitude:  1,
-			normalized: true,
-		},
-		y: FieldElement{
-			n:          [5]uint64{1, 0, 0, 0, 0}, // Placeholder - will be set properly
-			magnitude:  1,
-			normalized: true,
-		},
+	// Generator point in affine coordinates
+	// G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798,
+	//      0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8)
+	GeneratorX FieldElement
+	GeneratorY FieldElement
+	Generator  GroupElementAffine
+)
+
+// Initialize generator point
+func init() {
+	// Generator X coordinate: 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
+	gxBytes := []byte{
+		0x79, 0xBE, 0x66, 0x7E, 0xF9, 0xDC, 0xBB, 0xAC, 0x55, 0xA0, 0x62, 0x95, 0xCE, 0x87, 0x0B, 0x07,
+		0x02, 0x9B, 0xFC, 0xDB, 0x2D, 0xCE, 0x28, 0xD9, 0x59, 0xF2, 0x81, 0x5B, 0x16, 0xF8, 0x17, 0x98,
+	}
+	
+	// Generator Y coordinate: 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8
+	gyBytes := []byte{
+		0x48, 0x3A, 0xDA, 0x77, 0x26, 0xA3, 0xC4, 0x65, 0x5D, 0xA4, 0xFB, 0xFC, 0x0E, 0x11, 0x08, 0xA8,
+		0xFD, 0x17, 0xB4, 0x48, 0xA6, 0x85, 0x54, 0x19, 0x9C, 0x47, 0xD0, 0x8F, 0xFB, 0x10, 0xD4, 0xB8,
+	}
+	
+	GeneratorX.setB32(gxBytes)
+	GeneratorY.setB32(gyBytes)
+	
+	// Create generator point
+	Generator = GroupElementAffine{
+		x:        GeneratorX,
+		y:        GeneratorY,
 		infinity: false,
 	}
-
-	// Point at infinity
-	InfinityAffine = GroupElementAffine{
-		x:        FieldElementZero,
-		y:        FieldElementZero,
-		infinity: true,
-	}
-
-	InfinityJacobian = GroupElementJacobian{
-		x:        FieldElementZero,
-		y:        FieldElementZero,
-		z:        FieldElementZero,
-		infinity: true,
-	}
-)
+}
 
 // NewGroupElementAffine creates a new affine group element
 func NewGroupElementAffine() *GroupElementAffine {
@@ -73,7 +75,7 @@ func NewGroupElementJacobian() *GroupElementJacobian {
 	}
 }
 
-// setXY sets a group element to the point with given X and Y coordinates
+// setXY sets a group element to the point with given coordinates
 func (r *GroupElementAffine) setXY(x, y *FieldElement) {
 	r.x = *x
 	r.y = *y
@@ -82,7 +84,7 @@ func (r *GroupElementAffine) setXY(x, y *FieldElement) {
 
 // setXOVar sets a group element to the point with given X coordinate and Y oddness
 func (r *GroupElementAffine) setXOVar(x *FieldElement, odd bool) bool {
-	// Compute y^2 = x^3 + 7
+	// Compute y^2 = x^3 + 7 (secp256k1 curve equation)
 	var x2, x3, y2 FieldElement
 	x2.sqr(x)
 	x3.mul(&x2, x)
@@ -90,8 +92,8 @@ func (r *GroupElementAffine) setXOVar(x *FieldElement, odd bool) bool {
 	// Add 7 (the curve parameter b)
 	var seven FieldElement
 	seven.setInt(7)
+	y2 = x3
 	y2.add(&seven)
-	y2.add(&x3)
 
 	// Try to compute square root
 	var y FieldElement
@@ -100,6 +102,7 @@ func (r *GroupElementAffine) setXOVar(x *FieldElement, odd bool) bool {
 	}
 
 	// Choose the correct square root based on oddness
+	y.normalize()
 	if y.isOdd() != odd {
 		y.negate(&y, 1)
 		y.normalize()
@@ -120,30 +123,54 @@ func (r *GroupElementAffine) isValid() bool {
 		return true
 	}
 
-	// For now, just return true to avoid complex curve equation checking
-	// Real implementation would check y^2 = x^3 + 7
-	return true
+	// Check curve equation: y^2 = x^3 + 7
+	var lhs, rhs, x2, x3 FieldElement
+	
+	// Normalize coordinates
+	var xNorm, yNorm FieldElement
+	xNorm = r.x
+	yNorm = r.y
+	xNorm.normalize()
+	yNorm.normalize()
+	
+	// Compute y^2
+	lhs.sqr(&yNorm)
+	
+	// Compute x^3 + 7
+	x2.sqr(&xNorm)
+	x3.mul(&x2, &xNorm)
+	rhs = x3
+	var seven FieldElement
+	seven.setInt(7)
+	rhs.add(&seven)
+	
+	// Normalize both sides
+	lhs.normalize()
+	rhs.normalize()
+	
+	return lhs.equal(&rhs)
 }
 
 // negate sets r to the negation of a (mirror around X axis)
 func (r *GroupElementAffine) negate(a *GroupElementAffine) {
 	if a.infinity {
-		*r = InfinityAffine
+		r.setInfinity()
 		return
 	}
-
+	
 	r.x = a.x
-	r.y.negate(&a.y, 1)
-	r.y.normalize()
+	r.y.negate(&a.y, a.y.magnitude)
 	r.infinity = false
 }
 
 // setInfinity sets the group element to the point at infinity
 func (r *GroupElementAffine) setInfinity() {
-	*r = InfinityAffine
+	r.x = FieldElementZero
+	r.y = FieldElementZero
+	r.infinity = true
 }
 
-// equal checks if two affine group elements are equal
+// equal returns true if two group elements are equal
 func (r *GroupElementAffine) equal(a *GroupElementAffine) bool {
 	if r.infinity && a.infinity {
 		return true
@@ -151,27 +178,27 @@ func (r *GroupElementAffine) equal(a *GroupElementAffine) bool {
 	if r.infinity || a.infinity {
 		return false
 	}
-
-	// Both points must be normalized for comparison
-	var rx, ry, ax, ay FieldElement
-	rx = r.x
-	ry = r.y
-	ax = a.x
-	ay = a.y
-
-	rx.normalize()
-	ry.normalize()
-	ax.normalize()
-	ay.normalize()
-
-	return rx.equal(&ax) && ry.equal(&ay)
+	
+	// Normalize both points
+	var rNorm, aNorm GroupElementAffine
+	rNorm = *r
+	aNorm = *a
+	rNorm.x.normalize()
+	rNorm.y.normalize()
+	aNorm.x.normalize()
+	aNorm.y.normalize()
+	
+	return rNorm.x.equal(&aNorm.x) && rNorm.y.equal(&aNorm.y)
 }
 
 // Jacobian coordinate operations
 
 // setInfinity sets the Jacobian group element to the point at infinity
 func (r *GroupElementJacobian) setInfinity() {
-	*r = InfinityJacobian
+	r.x = FieldElementZero
+	r.y = FieldElementOne
+	r.z = FieldElementZero
+	r.infinity = true
 }
 
 // isInfinity returns true if the Jacobian group element is the point at infinity
@@ -179,37 +206,58 @@ func (r *GroupElementJacobian) isInfinity() bool {
 	return r.infinity
 }
 
-// setGE sets a Jacobian group element from an affine group element
+// setGE sets a Jacobian element from an affine element
 func (r *GroupElementJacobian) setGE(a *GroupElementAffine) {
 	if a.infinity {
 		r.setInfinity()
 		return
 	}
-
+	
 	r.x = a.x
 	r.y = a.y
 	r.z = FieldElementOne
 	r.infinity = false
 }
 
-// setGEJ sets an affine group element from a Jacobian group element
+// setGEJ sets an affine element from a Jacobian element
+// This follows the C secp256k1_ge_set_gej_var implementation exactly
 func (r *GroupElementAffine) setGEJ(a *GroupElementJacobian) {
 	if a.infinity {
 		r.setInfinity()
 		return
 	}
-
-	// Convert from Jacobian to affine: (x/z^2, y/z^3)
-	var zi, zi2, zi3 FieldElement
-	zi.inv(&a.z)
-	zi2.sqr(&zi)
-	zi3.mul(&zi2, &zi)
-
-	r.x.mul(&a.x, &zi2)
-	r.y.mul(&a.y, &zi3)
-	r.x.normalize()
-	r.y.normalize()
+	
+	// Following C code exactly: secp256k1_ge_set_gej_var modifies the input!
+	// We need to make a copy to avoid modifying the original
+	var aCopy GroupElementJacobian
+	aCopy = *a
+	
 	r.infinity = false
+	
+	// secp256k1_fe_inv_var(&a->z, &a->z);
+	// Note: inv normalizes the input internally
+	aCopy.z.inv(&aCopy.z)
+	
+	// secp256k1_fe_sqr(&z2, &a->z);
+	var z2 FieldElement
+	z2.sqr(&aCopy.z)
+	
+	// secp256k1_fe_mul(&z3, &a->z, &z2);
+	var z3 FieldElement
+	z3.mul(&aCopy.z, &z2)
+	
+	// secp256k1_fe_mul(&a->x, &a->x, &z2);
+	aCopy.x.mul(&aCopy.x, &z2)
+	
+	// secp256k1_fe_mul(&a->y, &a->y, &z3);
+	aCopy.y.mul(&aCopy.y, &z3)
+	
+	// secp256k1_fe_set_int(&a->z, 1);
+	aCopy.z.setInt(1)
+	
+	// secp256k1_ge_set_xy(r, &a->x, &a->y);
+	r.x = aCopy.x
+	r.y = aCopy.y
 }
 
 // negate sets r to the negation of a Jacobian point
@@ -218,61 +266,82 @@ func (r *GroupElementJacobian) negate(a *GroupElementJacobian) {
 		r.setInfinity()
 		return
 	}
-
+	
 	r.x = a.x
-	r.y.negate(&a.y, 1)
+	r.y.negate(&a.y, a.y.magnitude)
 	r.z = a.z
 	r.infinity = false
 }
 
 // double sets r = 2*a (point doubling in Jacobian coordinates)
+// This follows the C secp256k1_gej_double implementation exactly
 func (r *GroupElementJacobian) double(a *GroupElementJacobian) {
-	if a.infinity {
-		r.setInfinity()
-		return
-	}
-
-	// Use the doubling formula for Jacobian coordinates
-	// This is optimized for the secp256k1 curve (a = 0)
-
-	var y1, z1, s, m, t FieldElement
-	y1 = a.y
-	z1 = a.z
-
-	// s = 4*x1*y1^2
-	s.sqr(&y1)
-	s.normalizeWeak() // Ensure magnitude is manageable
-	s.mul(&s, &a.x)
-	s.mulInt(4)
-
-	// m = 3*x1^2 (since a = 0 for secp256k1)
-	m.sqr(&a.x)
-	m.normalizeWeak() // Ensure magnitude is manageable
-	m.mulInt(3)
-
-	// x3 = m^2 - 2*s
-	r.x.sqr(&m)
-	t = s
-	t.mulInt(2)
+	// Exact C translation - no early return for infinity
+	// From C code - exact translation with proper variable reuse:
+	// secp256k1_fe_mul(&r->z, &a->z, &a->y); /* Z3 = Y1*Z1 (1) */
+	// secp256k1_fe_sqr(&s, &a->y);           /* S = Y1^2 (1) */
+	// secp256k1_fe_sqr(&l, &a->x);           /* L = X1^2 (1) */
+	// secp256k1_fe_mul_int(&l, 3);           /* L = 3*X1^2 (3) */
+	// secp256k1_fe_half(&l);                 /* L = 3/2*X1^2 (2) */
+	// secp256k1_fe_negate(&t, &s, 1);        /* T = -S (2) */
+	// secp256k1_fe_mul(&t, &t, &a->x);       /* T = -X1*S (1) */
+	// secp256k1_fe_sqr(&r->x, &l);           /* X3 = L^2 (1) */
+	// secp256k1_fe_add(&r->x, &t);           /* X3 = L^2 + T (2) */
+	// secp256k1_fe_add(&r->x, &t);           /* X3 = L^2 + 2*T (3) */
+	// secp256k1_fe_sqr(&s, &s);              /* S' = S^2 (1) */
+	// secp256k1_fe_add(&t, &r->x);           /* T' = X3 + T (4) */
+	// secp256k1_fe_mul(&r->y, &t, &l);       /* Y3 = L*(X3 + T) (1) */
+	// secp256k1_fe_add(&r->y, &s);           /* Y3 = L*(X3 + T) + S^2 (2) */
+	// secp256k1_fe_negate(&r->y, &r->y, 2);  /* Y3 = -(L*(X3 + T) + S^2) (3) */
+	
+	var l, s, t FieldElement
+	
+	r.infinity = a.infinity
+	
+	// Z3 = Y1*Z1 (1)
+	r.z.mul(&a.z, &a.y)
+	
+	// S = Y1^2 (1)
+	s.sqr(&a.y)
+	
+	// L = X1^2 (1)
+	l.sqr(&a.x)
+	
+	// L = 3*X1^2 (3)
+	l.mulInt(3)
+	
+	// L = 3/2*X1^2 (2)
+	l.half(&l)
+	
+	// T = -S (2) where S = Y1^2
+	t.negate(&s, 1)
+	
+	// T = -X1*S = -X1*Y1^2 (1)
+	t.mul(&t, &a.x)
+	
+	// X3 = L^2 (1)
+	r.x.sqr(&l)
+	
+	// X3 = L^2 + T (2)
 	r.x.add(&t)
-	r.x.negate(&r.x, r.x.magnitude)
-
-	// y3 = m*(s - x3) - 8*y1^4
-	t = s
+	
+	// X3 = L^2 + 2*T (3)
+	r.x.add(&t)
+	
+	// S = S^2 = (Y1^2)^2 = Y1^4 (1)
+	s.sqr(&s)
+	
+	// T = X3 + T = X3 + (-X1*Y1^2) (4)
 	t.add(&r.x)
-	t.negate(&t, t.magnitude)
-	r.y.mul(&m, &t)
-	t.sqr(&y1)
-	t.sqr(&t)
-	t.mulInt(8)
-	r.y.add(&t)
-	r.y.negate(&r.y, r.y.magnitude)
-
-	// z3 = 2*y1*z1
-	r.z.mul(&y1, &z1)
-	r.z.mulInt(2)
-
-	r.infinity = false
+	
+	// Y3 = L*(X3 + T) = L*(X3 + (-X1*Y1^2)) (1)
+	r.y.mul(&t, &l)
+	
+	// Y3 = L*(X3 + T) + S^2 = L*(X3 + (-X1*Y1^2)) + Y1^4 (2)
+	r.y.add(&s)
+	
+	// Y3 = -(L*(X3 + T) + S^2) (3)
+	r.y.negate(&r.y, 2)
 }
 
 // addVar sets r = a + b (variable-time point addition)
@@ -285,93 +354,64 @@ func (r *GroupElementJacobian) addVar(a, b *GroupElementJacobian) {
 		*r = *a
 		return
 	}
-
-	// Use the addition formula for Jacobian coordinates
-	var z1z1, z2z2, u1, u2, s1, s2, h, i, j, v FieldElement
-
-	// z1z1 = z1^2, z2z2 = z2^2
-	z1z1.sqr(&a.z)
-	z2z2.sqr(&b.z)
-
-	// u1 = x1*z2z2, u2 = x2*z1z1
-	u1.mul(&a.x, &z2z2)
-	u2.mul(&b.x, &z1z1)
-
-	// s1 = y1*z2*z2z2, s2 = y2*z1*z1z1
-	s1.mul(&a.y, &b.z)
-	s1.mul(&s1, &z2z2)
-	s2.mul(&b.y, &a.z)
-	s2.mul(&s2, &z1z1)
-
-	// Check if points are equal or opposite
-	h = u2
-	h.add(&u1)
-	h.negate(&h, h.magnitude)
-	h.normalize()
-
-	if h.isZero() {
-		// Points have same x coordinate
-		v = s2
-		v.add(&s1)
-		v.negate(&v, v.magnitude)
-		v.normalize()
-
-		if v.isZero() {
-			// Points are equal, use doubling
-			r.double(a)
-			return
-		} else {
-			// Points are opposite, result is infinity
-			r.setInfinity()
-			return
-		}
+	
+	// Addition formula for Jacobian coordinates
+	// This is a simplified implementation - the full version would be more optimized
+	
+	// Convert to affine for simplicity (not optimal but correct)
+	var aAff, bAff, rAff GroupElementAffine
+	aAff.setGEJ(a)
+	bAff.setGEJ(b)
+	
+	// Check if points are equal or negatives
+	if aAff.equal(&bAff) {
+		r.double(a)
+		return
 	}
-
-	// General addition case
-	// i = (2*h)^2, j = h*i
-	i = h
-	i.mulInt(2)
-	i.sqr(&i)
-	j.mul(&h, &i)
-
-	// v = s1 - s2
-	v = s1
-	v.add(&s2)
-	v.negate(&v, v.magnitude)
-
-	// x3 = v^2 - j - 2*u1*i
-	r.x.sqr(&v)
-	r.x.add(&j)
-	r.x.negate(&r.x, r.x.magnitude)
+	
+	var negB GroupElementAffine
+	negB.negate(&bAff)
+	if aAff.equal(&negB) {
+		r.setInfinity()
+		return
+	}
+	
+	// General addition in affine coordinates
+	// lambda = (y2 - y1) / (x2 - x1)
+	// x3 = lambda^2 - x1 - x2
+	// y3 = lambda*(x1 - x3) - y1
+	
+	var dx, dy, lambda, x3, y3 FieldElement
+	
+	// dx = x2 - x1, dy = y2 - y1
+	dx = bAff.x
+	dx.sub(&aAff.x)
+	dy = bAff.y
+	dy.sub(&aAff.y)
+	
+	// lambda = dy / dx
+	var dxInv FieldElement
+	dxInv.inv(&dx)
+	lambda.mul(&dy, &dxInv)
+	
+	// x3 = lambda^2 - x1 - x2
+	x3.sqr(&lambda)
+	x3.sub(&aAff.x)
+	x3.sub(&bAff.x)
+	
+	// y3 = lambda*(x1 - x3) - y1
 	var temp FieldElement
-	temp.mul(&u1, &i)
-	temp.mulInt(2)
-	r.x.add(&temp)
-	r.x.negate(&r.x, r.x.magnitude)
-
-	// y3 = v*(u1*i - x3) - s1*j
-	temp.mul(&u1, &i)
-	temp.add(&r.x)
-	temp.negate(&temp, temp.magnitude)
-	r.y.mul(&v, &temp)
-	temp.mul(&s1, &j)
-	r.y.add(&temp)
-	r.y.negate(&r.y, r.y.magnitude)
-
-	// z3 = ((z1+z2)^2 - z1z1 - z2z2)*h
-	r.z = a.z
-	r.z.add(&b.z)
-	r.z.sqr(&r.z)
-	r.z.add(&z1z1)
-	r.z.negate(&r.z, r.z.magnitude)
-	r.z.add(&z2z2)
-	r.z.negate(&r.z, r.z.magnitude)
-	r.z.mul(&r.z, &h)
-
-	r.infinity = false
+	temp = aAff.x
+	temp.sub(&x3)
+	y3.mul(&lambda, &temp)
+	y3.sub(&aAff.y)
+	
+	// Set result
+	rAff.setXY(&x3, &y3)
+	r.setGE(&rAff)
 }
 
-// addGE adds an affine point to a Jacobian point: r = a + b
+// addGE sets r = a + b where a is Jacobian and b is affine
 func (r *GroupElementJacobian) addGE(a *GroupElementJacobian, b *GroupElementAffine) {
 	if a.infinity {
 		r.setGE(b)
@@ -381,85 +421,11 @@ func (r *GroupElementJacobian) addGE(a *GroupElementJacobian, b *GroupElementAff
 		*r = *a
 		return
 	}
-
-	// Optimized addition when one point is in affine coordinates
-	var z1z1, u2, s2, h, hh, i, j, v FieldElement
-
-	// z1z1 = z1^2
-	z1z1.sqr(&a.z)
-
-	// u2 = x2*z1z1
-	u2.mul(&b.x, &z1z1)
-
-	// s2 = y2*z1*z1z1
-	s2.mul(&b.y, &a.z)
-	s2.mul(&s2, &z1z1)
-
-	// h = u2 - x1
-	h = u2
-	h.add(&a.x)
-	h.negate(&h, h.magnitude)
-
-	// Check for special cases
-	h.normalize()
-	if h.isZero() {
-		v = s2
-		v.add(&a.y)
-		v.negate(&v, v.magnitude)
-		v.normalize()
-
-		if v.isZero() {
-			// Points are equal, use doubling
-			r.double(a)
-			return
-		} else {
-			// Points are opposite
-			r.setInfinity()
-			return
-		}
-	}
-
-	// General case
-	// hh = h^2, i = 4*hh, j = h*i
-	hh.sqr(&h)
-	i = hh
-	i.mulInt(4)
-	j.mul(&h, &i)
-
-	// v = s2 - y1
-	v = s2
-	v.add(&a.y)
-	v.negate(&v, v.magnitude)
-
-	// x3 = v^2 - j - 2*x1*i
-	r.x.sqr(&v)
-	r.x.add(&j)
-	r.x.negate(&r.x, r.x.magnitude)
-	var temp FieldElement
-	temp.mul(&a.x, &i)
-	temp.mulInt(2)
-	r.x.add(&temp)
-	r.x.negate(&r.x, r.x.magnitude)
-
-	// y3 = v*(x1*i - x3) - y1*j
-	temp.mul(&a.x, &i)
-	temp.add(&r.x)
-	temp.negate(&temp, temp.magnitude)
-	r.y.mul(&v, &temp)
-	temp.mul(&a.y, &j)
-	r.y.add(&temp)
-	r.y.negate(&r.y, r.y.magnitude)
-
-	// z3 = (z1+h)^2 - z1z1 - hh
-	r.z = a.z
-	r.z.add(&h)
-	r.z.sqr(&r.z)
-	r.z.add(&z1z1)
-	r.z.negate(&r.z, r.z.magnitude)
-	r.z.add(&hh)
-	r.z.negate(&r.z, r.z.magnitude)
-
-	r.infinity = false
+	
+	// Convert b to Jacobian and use addVar
+	var bJac GroupElementJacobian
+	bJac.setGE(b)
+	r.addVar(a, &bJac)
 }
 
 // clear clears a group element to prevent leaking sensitive information
@@ -477,57 +443,95 @@ func (r *GroupElementJacobian) clear() {
 	r.infinity = true
 }
 
-// toStorage converts an affine group element to storage format
+// toStorage converts a group element to storage format
 func (r *GroupElementAffine) toStorage(s *GroupElementStorage) {
 	if r.infinity {
-		panic("cannot convert infinity to storage")
+		// Store infinity as all zeros
+		for i := range s.x {
+			s.x[i] = 0
+			s.y[i] = 0
+		}
+		return
 	}
-
-	var x, y FieldElement
-	x = r.x
-	y = r.y
-	x.normalize()
-	y.normalize()
-
-	x.toStorage(&s.x)
-	y.toStorage(&s.y)
+	
+	// Normalize and convert to bytes
+	var normalized GroupElementAffine
+	normalized = *r
+	normalized.x.normalize()
+	normalized.y.normalize()
+	
+	normalized.x.getB32(s.x[:])
+	normalized.y.getB32(s.y[:])
 }
 
-// fromStorage converts from storage format to affine group element
+// fromStorage converts from storage format to group element
 func (r *GroupElementAffine) fromStorage(s *GroupElementStorage) {
-	r.x.fromStorage(&s.x)
-	r.y.fromStorage(&s.y)
+	// Check if it's the infinity point (all zeros)
+	var allZero bool = true
+	for i := range s.x {
+		if s.x[i] != 0 || s.y[i] != 0 {
+			allZero = false
+			break
+		}
+	}
+	
+	if allZero {
+		r.setInfinity()
+		return
+	}
+	
+	// Convert from bytes
+	r.x.setB32(s.x[:])
+	r.y.setB32(s.y[:])
 	r.infinity = false
 }
 
-// toBytes converts a group element to a 64-byte array (platform-dependent)
+// toBytes converts a group element to byte representation
 func (r *GroupElementAffine) toBytes(buf []byte) {
-	if len(buf) != 64 {
-		panic("buffer must be 64 bytes")
+	if len(buf) < 64 {
+		panic("buffer too small for group element")
 	}
+	
 	if r.infinity {
-		panic("cannot convert infinity to bytes")
+		// Represent infinity as all zeros
+		for i := range buf[:64] {
+			buf[i] = 0
+		}
+		return
 	}
-
-	var x, y FieldElement
-	x = r.x
-	y = r.y
-	x.normalize()
-	y.normalize()
-
-	x.getB32(buf[0:32])
-	y.getB32(buf[32:64])
+	
+	// Normalize and convert
+	var normalized GroupElementAffine
+	normalized = *r
+	normalized.x.normalize()
+	normalized.y.normalize()
+	
+	normalized.x.getB32(buf[:32])
+	normalized.y.getB32(buf[32:64])
 }
 
-// fromBytes converts a 64-byte array to a group element
+// fromBytes converts from byte representation to group element
 func (r *GroupElementAffine) fromBytes(buf []byte) {
-	if len(buf) != 64 {
-		panic("buffer must be 64 bytes")
+	if len(buf) < 64 {
+		panic("buffer too small for group element")
 	}
-
-	r.x.setB32(buf[0:32])
+	
+	// Check if it's all zeros (infinity)
+	var allZero bool = true
+	for i := 0; i < 64; i++ {
+		if buf[i] != 0 {
+			allZero = false
+			break
+		}
+	}
+	
+	if allZero {
+		r.setInfinity()
+		return
+	}
+	
+	// Convert from bytes
+	r.x.setB32(buf[:32])
 	r.y.setB32(buf[32:64])
-	r.x.normalize()
-	r.y.normalize()
 	r.infinity = false
 }

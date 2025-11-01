@@ -1,4 +1,4 @@
-module p256k1.mleku.dev/pkg
+module p256k1.mleku.dev
 
 go 1.21
 

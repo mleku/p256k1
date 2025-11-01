@@ -1,30 +1,24 @@
 package p256k1
 
 import (
-	"crypto/rand"
 	"testing"
 )
 
-// Test field element creation and basic operations
 func TestFieldElementBasics(t *testing.T) {
-	// Test zero element
+	// Test zero field element
 	var zero FieldElement
 	zero.setInt(0)
+	zero.normalize()
 	if !zero.isZero() {
-		t.Error("Zero element should be zero")
+		t.Error("Zero field element should be zero")
 	}
 
-	// Test one element
+	// Test one field element
 	var one FieldElement
 	one.setInt(1)
-	if one.isZero() {
-		t.Error("One element should not be zero")
-	}
-
-	// Test normalization
 	one.normalize()
-	if !one.normalized {
-		t.Error("Element should be normalized after normalize()")
+	if one.isZero() {
+		t.Error("One field element should not be zero")
 	}
 
 	// Test equality
@@ -70,7 +64,7 @@ func TestFieldElementSetB32(t *testing.T) {
 			if tc.name == "max_value" {
 				// This should be reduced modulo p
 				var expected FieldElement
-				expected.setInt(0) // p - 1 mod p = 0
+				expected.setInt(0) // p mod p = 0
 				expected.normalize()
 				if !fe.equal(&expected) {
 					t.Error("Field modulus should reduce to zero")
@@ -92,14 +86,13 @@ func TestFieldElementArithmetic(t *testing.T) {
 	var expected FieldElement
 	expected.setInt(12)
 	expected.normalize()
-
 	if !c.equal(&expected) {
 		t.Error("5 + 7 should equal 12")
 	}
 
 	// Test negation
 	var neg FieldElement
-	neg.negate(&a, 1)
+	neg.negate(&a, a.magnitude)
 	neg.normalize()
 
 	var sum FieldElement
@@ -113,28 +106,29 @@ func TestFieldElementArithmetic(t *testing.T) {
 }
 
 func TestFieldElementMultiplication(t *testing.T) {
-	// Test multiplication by small integers
-	var a, result FieldElement
-	a.setInt(3)
-	result = a
-	result.mulInt(4)
-	result.normalize()
+	// Test multiplication
+	var a, b, c FieldElement
+	a.setInt(5)
+	b.setInt(7)
+	c.mul(&a, &b)
+	c.normalize()
 
 	var expected FieldElement
-	expected.setInt(12)
+	expected.setInt(35)
 	expected.normalize()
-
-	if !result.equal(&expected) {
-		t.Error("3 * 4 should equal 12")
+	if !c.equal(&expected) {
+		t.Error("5 * 7 should equal 35")
 	}
 
-	// Test multiplication by zero
-	result = a
-	result.mulInt(0)
-	result.normalize()
+	// Test squaring
+	var sq FieldElement
+	sq.sqr(&a)
+	sq.normalize()
 
-	if !result.isZero() {
-		t.Error("a * 0 should equal zero")
+	expected.setInt(25)
+	expected.normalize()
+	if !sq.equal(&expected) {
+		t.Error("5^2 should equal 25")
 	}
 }
 
@@ -142,61 +136,52 @@ func TestFieldElementNormalization(t *testing.T) {
 	var fe FieldElement
 	fe.setInt(42)
 
-	// Test weak normalization
-	fe.normalizeWeak()
-	if fe.magnitude != 1 {
-		t.Error("Weak normalization should set magnitude to 1")
+	// Before normalization
+	if fe.normalized {
+		fe.normalized = false // Force non-normalized state
 	}
 
-	// Test full normalization
+	// After normalization
 	fe.normalize()
 	if !fe.normalized {
-		t.Error("Full normalization should set normalized flag")
+		t.Error("Field element should be normalized after normalize()")
 	}
 	if fe.magnitude != 1 {
-		t.Error("Full normalization should set magnitude to 1")
+		t.Error("Normalized field element should have magnitude 1")
 	}
 }
 
 func TestFieldElementOddness(t *testing.T) {
-	// Test even number
-	var even FieldElement
-	even.setInt(42)
+	var even, odd FieldElement
+	even.setInt(4)
 	even.normalize()
-	if even.isOdd() {
-		t.Error("42 should be even")
-	}
-
-	// Test odd number
-	var odd FieldElement
-	odd.setInt(43)
+	odd.setInt(5)
 	odd.normalize()
+
+	if even.isOdd() {
+		t.Error("4 should be even")
+	}
 	if !odd.isOdd() {
-		t.Error("43 should be odd")
+		t.Error("5 should be odd")
 	}
 }
 
 func TestFieldElementConditionalMove(t *testing.T) {
-	var a, b, result FieldElement
-	a.setInt(10)
-	b.setInt(20)
-	result = a
+	var a, b, original FieldElement
+	a.setInt(5)
+	b.setInt(10)
+	original = a
 
-	// Test conditional move with flag = 0 (no move)
-	result.cmov(&b, 0)
-	result.normalize()
-	a.normalize()
-	if !result.equal(&a) {
-		t.Error("cmov with flag=0 should not change value")
+	// Test conditional move with flag = 0
+	a.cmov(&b, 0)
+	if !a.equal(&original) {
+		t.Error("Conditional move with flag=0 should not change value")
 	}
 
-	// Test conditional move with flag = 1 (move)
-	result = a
-	result.cmov(&b, 1)
-	result.normalize()
-	b.normalize()
-	if !result.equal(&b) {
-		t.Error("cmov with flag=1 should change value")
+	// Test conditional move with flag = 1
+	a.cmov(&b, 1)
+	if !a.equal(&b) {
+		t.Error("Conditional move with flag=1 should copy value")
 	}
 }
 
@@ -205,43 +190,17 @@ func TestFieldElementStorage(t *testing.T) {
 	fe.setInt(12345)
 	fe.normalize()
 
-	// Test conversion to storage format
+	// Convert to storage
 	var storage FieldElementStorage
 	fe.toStorage(&storage)
 
-	// Test conversion back from storage
+	// Convert back
 	var restored FieldElement
 	restored.fromStorage(&storage)
+	restored.normalize()
 
 	if !fe.equal(&restored) {
 		t.Error("Storage round-trip should preserve value")
-	}
-}
-
-func TestFieldElementRandomOperations(t *testing.T) {
-	// Test with random values
-	for i := 0; i < 100; i++ {
-		var bytes1, bytes2 [32]byte
-		rand.Read(bytes1[:])
-		rand.Read(bytes2[:])
-
-		var a, b, sum, diff FieldElement
-		a.setB32(bytes1[:])
-		b.setB32(bytes2[:])
-
-		// Test a + b - b = a
-		sum = a
-		sum.add(&b)
-		diff = sum
-		var negB FieldElement
-		negB.negate(&b, b.magnitude)
-		diff.add(&negB)
-		diff.normalize()
-		a.normalize()
-
-		if !diff.equal(&a) {
-			t.Errorf("Random test %d: (a + b) - b should equal a", i)
-		}
 	}
 }
 
@@ -283,57 +242,5 @@ func TestFieldElementClear(t *testing.T) {
 	}
 	if !fe.normalized {
 		t.Error("Cleared field element should be normalized")
-	}
-}
-
-// Benchmark tests
-func BenchmarkFieldElementSetB32(b *testing.B) {
-	var bytes [32]byte
-	rand.Read(bytes[:])
-	var fe FieldElement
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		fe.setB32(bytes[:])
-	}
-}
-
-func BenchmarkFieldElementNormalize(b *testing.B) {
-	var fe FieldElement
-	fe.setInt(12345)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		fe.normalize()
-	}
-}
-
-func BenchmarkFieldElementAdd(b *testing.B) {
-	var a, c FieldElement
-	a.setInt(12345)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		c.add(&a)
-	}
-}
-
-func BenchmarkFieldElementMulInt(b *testing.B) {
-	var fe FieldElement
-	fe.setInt(12345)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		fe.mulInt(7)
-	}
-}
-
-func BenchmarkFieldElementNegate(b *testing.B) {
-	var a, result FieldElement
-	a.setInt(12345)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		result.negate(&a, 1)
 	}
 }

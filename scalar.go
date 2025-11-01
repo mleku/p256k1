@@ -624,11 +624,3 @@ func (x uint128) addMul(a, b uint64) uint128 {
 	return uint128{low: low, high: high}
 }
 
-// Helper function to convert bool to int
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-

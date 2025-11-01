@@ -6,7 +6,7 @@ import (
 )
 
 // EcmultConst computes r = q * a using constant-time multiplication
-// This is a simplified implementation for Phase 3 - can be optimized later
+// Uses simple binary method - GLV still has issues, reverting for now
 func EcmultConst(r *GroupElementJacobian, a *GroupElementAffine, q *Scalar) {
 	if a.isInfinity() {
 		r.setInfinity()
@@ -22,8 +22,7 @@ func EcmultConst(r *GroupElementJacobian, a *GroupElementAffine, q *Scalar) {
 	var aJac GroupElementJacobian
 	aJac.setGE(a)
 	
-	// Use windowed multiplication for constant-time behavior
-	// For now, use a simple approach that's constant-time in the scalar
+	// Use simple binary method for constant-time behavior
 	r.setInfinity()
 	
 	var base GroupElementJacobian

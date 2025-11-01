@@ -372,3 +372,42 @@ func memclear(ptr unsafe.Pointer, n uintptr) {
 		*(*byte)(unsafe.Pointer(uintptr(ptr) + i)) = 0
 	}
 }
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// batchInverse computes the inverses of a slice of FieldElements.
+func batchInverse(out []FieldElement, a []FieldElement) {
+	n := len(a)
+	if n == 0 {
+		return
+	}
+
+	// This is a direct port of the batch inversion routine from btcec.
+	// It uses Montgomery's trick to perform a batch inversion with only a
+	// single inversion.
+	s := make([]FieldElement, n)
+
+	// s_i = a_0 * a_1 * ... * a_{i-1}
+	s[0].setInt(1)
+	for i := 1; i < n; i++ {
+		s[i].mul(&s[i-1], &a[i-1])
+	}
+
+	// u = (a_0 * a_1 * ... * a_{n-1})^-1
+	var u FieldElement
+	u.mul(&s[n-1], &a[n-1])
+	u.inv(&u)
+
+	// out_i = (a_0 * ... * a_{i-1}) * (a_0 * ... * a_i)^-1
+	//
+	// Loop backwards to make it an in-place algorithm.
+	for i := n - 1; i >= 0; i-- {
+		out[i].mul(&u, &s[i])
+		u.mul(&u, &a[i])
+	}
+}

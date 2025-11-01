@@ -33,11 +33,11 @@ const (
 	limb4Max = 0x0FFFFFFFFFFFF // 2^48 - 1
 
 	// Field modulus limbs for comparison
-	fieldModulusLimb0 = 0xFFFFEFFFFFC2F
+	fieldModulusLimb0 = 0xFFFFFFFFFFC2F
 	fieldModulusLimb1 = 0xFFFFFFFFFFFFF
 	fieldModulusLimb2 = 0xFFFFFFFFFFFFF
 	fieldModulusLimb3 = 0xFFFFFFFFFFFFF
-	fieldModulusLimb4 = 0x0FFFFFFFFFFFF
+	fieldModulusLimb4 = 0x0FFFFFFFFFF
 )
 
 // Field element constants

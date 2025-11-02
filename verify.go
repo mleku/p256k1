@@ -735,14 +735,17 @@ func secp256k1_ecmult(r *secp256k1_gej, a *secp256k1_gej, na *secp256k1_scalar, 
 		return
 	}
 
-	// Compute both multiplications in parallel (conceptually)
-	// This avoids building intermediate results separately
+	// Optimized: Use existing optimized Ecmult and EcmultGen functions
+	// These already use precomputed tables and optimized algorithms
+	// Precomputed tables are already used for G (via EcmultGen context)
+	// and for point a (via Ecmult's windowed multiplication)
 	var naa, ngg GroupElementJacobian
 
 	// Compute na * a using optimized windowed multiplication
+	// This already builds precomputed tables efficiently
 	Ecmult(&naa, &geja, &sna)
 
-	// Compute ng * G using optimized byte-based multiplication
+	// Compute ng * G using optimized byte-based multiplication with precomputed table
 	EcmultGen(&ngg, &sng)
 
 	// Add them together

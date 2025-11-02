@@ -446,6 +446,13 @@ func secp256k1_fe_equal(a *secp256k1_fe, b *secp256k1_fe) bool {
 	var fea, feb FieldElement
 	fea.n = a.n
 	feb.n = b.n
+	// Normalize both to ensure consistent state since secp256k1_fe doesn't carry
+	// magnitude information. This ensures that the limbs correspond to a valid
+	// field element representation before we compute the comparison.
+	fea.normalize()
+	feb.normalize()
+	
+	// Now compute the difference and check if it's zero: (a - b) ≡ 0 (mod p)
 	var na FieldElement
 	na.negate(&fea, 1)
 	na.add(&feb)

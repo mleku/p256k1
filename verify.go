@@ -2,6 +2,8 @@ package p256k1
 
 import (
 	"crypto/sha256"
+	"hash"
+	"sync"
 	"unsafe"
 )
 
@@ -668,6 +670,23 @@ func secp256k1_gej_add_zinv_var(r *secp256k1_gej, a *secp256k1_gej, b *secp256k1
 }
 
 // ============================================================================
+// GLOBAL PRE-ALLOCATED RESOURCES
+// ============================================================================
+
+// Global pre-allocated hash context for challenge computation to avoid allocations
+var (
+	challengeHashContext     hash.Hash
+	challengeHashContextOnce sync.Once
+)
+
+func getChallengeHashContext() hash.Hash {
+	challengeHashContextOnce.Do(func() {
+		challengeHashContext = sha256.New()
+	})
+	return challengeHashContext
+}
+
+// ============================================================================
 // EC MULTIPLICATION OPERATIONS
 // ============================================================================
 
@@ -899,14 +918,16 @@ func secp256k1_schnorrsig_sha256_tagged(sha *secp256k1_sha256) {
 
 // secp256k1_schnorrsig_challenge computes challenge hash
 func secp256k1_schnorrsig_challenge(e *secp256k1_scalar, r32 []byte, msg []byte, msglen int, pubkey32 []byte) {
-	// Optimized challenge computation - avoid allocations by writing directly to hash
+	// Optimized challenge computation using pre-allocated hash context to avoid allocations
 	var challengeHash [32]byte
 
 	// First hash: SHA256(tag)
 	tagHash := sha256.Sum256(bip340ChallengeTag)
 
 	// Second hash: SHA256(SHA256(tag) || SHA256(tag) || r32 || pubkey32 || msg)
-	h := sha256.New()
+	// Use pre-allocated hash context to avoid allocations
+	h := getChallengeHashContext()
+	h.Reset()
 	h.Write(tagHash[:])    // SHA256(tag)
 	h.Write(tagHash[:])    // SHA256(tag) again
 	h.Write(r32[:32])      // r32

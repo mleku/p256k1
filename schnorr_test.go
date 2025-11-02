@@ -236,3 +236,39 @@ func TestSchnorrMultipleSignatures(t *testing.T) {
 		t.Error("with different aux_rand, signatures should differ")
 	}
 }
+
+func BenchmarkSchnorrVerify(b *testing.B) {
+	// Generate keypair
+	kp, err := KeyPairGenerate()
+	if err != nil {
+		b.Fatalf("failed to generate keypair: %v", err)
+	}
+	defer kp.Clear()
+
+	// Get x-only pubkey
+	xonly, err := kp.XOnlyPubkey()
+	if err != nil {
+		b.Fatalf("failed to get x-only pubkey: %v", err)
+	}
+
+	// Create message
+	msg := make([]byte, 32)
+	for i := range msg {
+		msg[i] = byte(i)
+	}
+
+	// Sign
+	var sig [64]byte
+	if err := SchnorrSign(sig[:], msg, kp, nil); err != nil {
+		b.Fatalf("failed to sign: %v", err)
+	}
+
+	// Benchmark verification
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if !SchnorrVerify(sig[:], msg, xonly) {
+			b.Fatal("verification failed")
+		}
+	}
+}

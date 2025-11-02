@@ -2,6 +2,7 @@ package p256k1
 
 import (
 	"errors"
+	"sync"
 	"unsafe"
 )
 
@@ -20,6 +21,27 @@ var zeroMask = [32]byte{
 	116, 128, 68, 31, 144, 186, 37, 196,
 	136, 244, 97, 199, 11, 94, 165, 220,
 	170, 247, 175, 105, 39, 10, 165, 20,
+}
+
+// Global precomputed context for Schnorr verification
+// This eliminates the overhead of context creation per verification call
+var (
+	schnorrVerifyContext     *secp256k1_context
+	schnorrVerifyContextOnce sync.Once
+)
+
+// initSchnorrVerifyContext initializes the global Schnorr verification context
+func initSchnorrVerifyContext() {
+	schnorrVerifyContext = &secp256k1_context{
+		ecmult_gen_ctx: secp256k1_ecmult_gen_context{built: 1},
+		declassify:     0,
+	}
+}
+
+// getSchnorrVerifyContext returns the precomputed Schnorr verification context
+func getSchnorrVerifyContext() *secp256k1_context {
+	schnorrVerifyContextOnce.Do(initSchnorrVerifyContext)
+	return schnorrVerifyContext
 }
 
 // NonceFunctionBIP340 implements BIP-340 nonce generation
@@ -295,6 +317,7 @@ func SchnorrVerifyOld(sig64 []byte, msg32 []byte, xonlyPubkey *XOnlyPubkey) bool
 
 // SchnorrVerify verifies a Schnorr signature following BIP-340.
 // This is the new implementation translated from C secp256k1_schnorrsig_verify.
+// Uses precomputed context for optimal performance.
 func SchnorrVerify(sig64 []byte, msg32 []byte, xonlyPubkey *XOnlyPubkey) bool {
 	if len(sig64) != 64 {
 		return false
@@ -306,11 +329,8 @@ func SchnorrVerify(sig64 []byte, msg32 []byte, xonlyPubkey *XOnlyPubkey) bool {
 		return false
 	}
 
-	// Create a context (required by secp256k1_schnorrsig_verify)
-	ctx := &secp256k1_context{
-		ecmult_gen_ctx: secp256k1_ecmult_gen_context{built: 1},
-		declassify:     0,
-	}
+	// Use precomputed context (initialized once, reused across calls)
+	ctx := getSchnorrVerifyContext()
 
 	// Convert x-only pubkey to secp256k1_xonly_pubkey format
 	var secp_xonly secp256k1_xonly_pubkey

@@ -6,7 +6,7 @@ import (
 )
 
 // EcmultConst computes r = q * a using constant-time multiplication
-// Uses simple binary method - GLV still has issues, reverting for now
+// Uses simple binary method
 func EcmultConst(r *GroupElementJacobian, a *GroupElementAffine, q *Scalar) {
 	if a.isInfinity() {
 		r.setInfinity()

@@ -1,12 +1,49 @@
 package p256k1
 
 import (
+	"crypto/sha256"
 	"errors"
 	"hash"
+	"sync"
 	"unsafe"
 
-	"github.com/minio/sha256-simd"
+	sha256simd "github.com/minio/sha256-simd"
 )
+
+// Precomputed TaggedHash prefixes for common BIP-340 tags
+// These are computed once at init time to avoid repeated hash operations
+var (
+	bip340AuxTagHash       [32]byte
+	bip340NonceTagHash     [32]byte
+	bip340ChallengeTagHash [32]byte
+	taggedHashInitOnce     sync.Once
+)
+
+func initTaggedHashPrefixes() {
+	bip340AuxTagHash = sha256.Sum256([]byte("BIP0340/aux"))
+	bip340NonceTagHash = sha256.Sum256([]byte("BIP0340/nonce"))
+	bip340ChallengeTagHash = sha256.Sum256([]byte("BIP0340/challenge"))
+}
+
+// getTaggedHashPrefix returns the precomputed SHA256(tag) for common tags
+func getTaggedHashPrefix(tag []byte) [32]byte {
+	taggedHashInitOnce.Do(initTaggedHashPrefixes)
+
+	// Fast path for common BIP-340 tags
+	if len(tag) == 13 {
+		switch string(tag) {
+		case "BIP0340/aux":
+			return bip340AuxTagHash
+		case "BIP0340/nonce":
+			return bip340NonceTagHash
+		case "BIP0340/challenge":
+			return bip340ChallengeTagHash
+		}
+	}
+
+	// Fallback for unknown tags
+	return sha256.Sum256(tag)
+}
 
 // SHA256 represents a SHA-256 hash context
 type SHA256 struct {
@@ -16,7 +53,7 @@ type SHA256 struct {
 // NewSHA256 creates a new SHA-256 hash context
 func NewSHA256() *SHA256 {
 	h := &SHA256{}
-	h.hasher = sha256.New()
+	h.hasher = sha256simd.New()
 	return h
 }
 
@@ -56,7 +93,7 @@ type HMACSHA256 struct {
 // NewHMACSHA256 creates a new HMAC-SHA256 context with the given key
 func NewHMACSHA256(key []byte) *HMACSHA256 {
 	h := &HMACSHA256{}
-	
+
 	// Prepare key: if keylen > 64, hash it first
 	var rkey [64]byte
 	if len(key) <= 64 {
@@ -106,17 +143,17 @@ func (h *HMACSHA256) Finalize(out32 []byte) {
 	if len(out32) != 32 {
 		panic("output buffer must be 32 bytes")
 	}
-	
+
 	// Finalize inner hash
 	var temp [32]byte
 	h.inner.Finalize(temp[:])
-	
+
 	// Feed inner hash result to outer hash
 	h.outer.Write(temp[:])
-	
+
 	// Finalize outer hash
 	h.outer.Finalize(out32)
-	
+
 	// Clear temp
 	memclear(unsafe.Pointer(&temp), unsafe.Sizeof(temp))
 }
@@ -130,25 +167,25 @@ func (h *HMACSHA256) Clear() {
 
 // RFC6979HMACSHA256 implements RFC 6979 deterministic nonce generation
 type RFC6979HMACSHA256 struct {
-	v [32]byte
-	k [32]byte
+	v     [32]byte
+	k     [32]byte
 	retry int
 }
 
 // NewRFC6979HMACSHA256 initializes a new RFC6979 HMAC-SHA256 context
 func NewRFC6979HMACSHA256(key []byte) *RFC6979HMACSHA256 {
 	rng := &RFC6979HMACSHA256{}
-	
+
 	// RFC6979 3.2.b: V = 0x01 0x01 0x01 ... 0x01 (32 bytes)
 	for i := 0; i < 32; i++ {
 		rng.v[i] = 0x01
 	}
-	
+
 	// RFC6979 3.2.c: K = 0x00 0x00 0x00 ... 0x00 (32 bytes)
 	for i := 0; i < 32; i++ {
 		rng.k[i] = 0x00
 	}
-	
+
 	// RFC6979 3.2.d: K = HMAC_K(V || 0x00 || key)
 	hmac := NewHMACSHA256(rng.k[:])
 	hmac.Write(rng.v[:])
@@ -156,13 +193,13 @@ func NewRFC6979HMACSHA256(key []byte) *RFC6979HMACSHA256 {
 	hmac.Write(key)
 	hmac.Finalize(rng.k[:])
 	hmac.Clear()
-	
+
 	// V = HMAC_K(V)
 	hmac = NewHMACSHA256(rng.k[:])
 	hmac.Write(rng.v[:])
 	hmac.Finalize(rng.v[:])
 	hmac.Clear()
-	
+
 	// RFC6979 3.2.f: K = HMAC_K(V || 0x01 || key)
 	hmac = NewHMACSHA256(rng.k[:])
 	hmac.Write(rng.v[:])
@@ -170,13 +207,13 @@ func NewRFC6979HMACSHA256(key []byte) *RFC6979HMACSHA256 {
 	hmac.Write(key)
 	hmac.Finalize(rng.k[:])
 	hmac.Clear()
-	
+
 	// V = HMAC_K(V)
 	hmac = NewHMACSHA256(rng.k[:])
 	hmac.Write(rng.v[:])
 	hmac.Finalize(rng.v[:])
 	hmac.Clear()
-	
+
 	rng.retry = 0
 	return rng
 }
@@ -190,13 +227,13 @@ func (rng *RFC6979HMACSHA256) Generate(out []byte) {
 		hmac.Write([]byte{0x00})
 		hmac.Finalize(rng.k[:])
 		hmac.Clear()
-		
+
 		hmac = NewHMACSHA256(rng.k[:])
 		hmac.Write(rng.v[:])
 		hmac.Finalize(rng.v[:])
 		hmac.Clear()
 	}
-	
+
 	// Generate output bytes
 	outlen := len(out)
 	for outlen > 0 {
@@ -204,7 +241,7 @@ func (rng *RFC6979HMACSHA256) Generate(out []byte) {
 		hmac.Write(rng.v[:])
 		hmac.Finalize(rng.v[:])
 		hmac.Clear()
-		
+
 		now := outlen
 		if now > 32 {
 			now = 32
@@ -213,7 +250,7 @@ func (rng *RFC6979HMACSHA256) Generate(out []byte) {
 		out = out[now:]
 		outlen -= now
 	}
-	
+
 	rng.retry = 1
 }
 
@@ -229,22 +266,20 @@ func (rng *RFC6979HMACSHA256) Clear() {
 
 // TaggedHash computes SHA256(SHA256(tag) || SHA256(tag) || data)
 // This is used in BIP-340 for Schnorr signatures
+// Optimized to use precomputed tag hashes for common BIP-340 tags
 func TaggedHash(tag []byte, data []byte) [32]byte {
 	var result [32]byte
-	
-	// First hash: SHA256(tag)
-	h := NewSHA256()
-	h.Write(tag)
-	h.Finalize(result[:])
-	
+
+	// Get precomputed SHA256(tag) prefix (or compute if not cached)
+	tagHash := getTaggedHashPrefix(tag)
+
 	// Second hash: SHA256(SHA256(tag) || SHA256(tag) || data)
-	h = NewSHA256()
-	h.Write(result[:]) // SHA256(tag)
-	h.Write(result[:]) // SHA256(tag) again
-	h.Write(data)
-	h.Finalize(result[:])
-	h.Clear()
-	
+	h := sha256.New()
+	h.Write(tagHash[:]) // SHA256(tag)
+	h.Write(tagHash[:]) // SHA256(tag) again
+	h.Write(data)       // data
+	copy(result[:], h.Sum(nil))
+
 	return result
 }
 
@@ -253,7 +288,7 @@ func HashToScalar(hash []byte) (*Scalar, error) {
 	if len(hash) != 32 {
 		return nil, errors.New("hash must be 32 bytes")
 	}
-	
+
 	var scalar Scalar
 	scalar.setB32(hash)
 	return &scalar, nil
@@ -264,11 +299,10 @@ func HashToField(hash []byte) (*FieldElement, error) {
 	if len(hash) != 32 {
 		return nil, errors.New("hash must be 32 bytes")
 	}
-	
+
 	var field FieldElement
 	if err := field.setB32(hash); err != nil {
 		return nil, err
 	}
 	return &field, nil
 }
-

@@ -162,14 +162,20 @@ func ECPubkeyCreate(pubkey *PublicKey, seckey []byte) error {
 	var point GroupElementJacobian
 	EcmultGen(&point, &scalar)
 	
-	// Convert to affine and store
+	// Convert to affine and store directly - optimize by avoiding intermediate copy
 	var affine GroupElementAffine
 	affine.setGEJ(&point)
-	affine.toBytes(pubkey.data[:])
+	
+	// Normalize in-place and write directly to pubkey.data to avoid copy allocation
+	affine.x.normalize()
+	affine.y.normalize()
+	affine.x.getB32(pubkey.data[:32])
+	affine.y.getB32(pubkey.data[32:64])
 	
 	// Clear sensitive data
 	scalar.clear()
 	point.clear()
+	affine.clear()
 	
 	return nil
 }

@@ -44,15 +44,15 @@ func TestSecp256k1SchnorrsigVerifyComparison(t *testing.T) {
 		var secp_xonly secp256k1_xonly_pubkey
 		copy(secp_xonly.data[:], xonly.data[:])
 
-		// Test existing implementation
-		existingResult := SchnorrVerify(sig[:], msg, xonly)
+		// Test existing implementation (old)
+		existingResult := SchnorrVerifyOld(sig[:], msg, xonly)
 
-		// Test new implementation
-		newResult := secp256k1_schnorrsig_verify(ctx, sig[:], msg, len(msg), &secp_xonly)
+		// Test new implementation (C-translated)
+		newResult := SchnorrVerify(sig[:], msg, xonly)
 
 		// Compare results
-		if existingResult != (newResult != 0) {
-			t.Errorf("results differ: existing=%v, new=%d", existingResult, newResult)
+		if existingResult != newResult {
+			t.Errorf("results differ: existing=%v, new=%v", existingResult, newResult)
 		}
 
 		if !existingResult {
@@ -96,15 +96,15 @@ func TestSecp256k1SchnorrsigVerifyComparison(t *testing.T) {
 		var secp_xonly secp256k1_xonly_pubkey
 		copy(secp_xonly.data[:], xonly.data[:])
 
-		// Test existing implementation
-		existingResult := SchnorrVerify(sig[:], wrongMsg, xonly)
+		// Test existing implementation (old)
+		existingResult := SchnorrVerifyOld(sig[:], wrongMsg, xonly)
 
-		// Test new implementation
-		newResult := secp256k1_schnorrsig_verify(ctx, sig[:], wrongMsg, len(wrongMsg), &secp_xonly)
+		// Test new implementation (C-translated)
+		newResult := SchnorrVerify(sig[:], wrongMsg, xonly)
 
 		// Compare results
-		if existingResult != (newResult != 0) {
-			t.Errorf("results differ: existing=%v, new=%d", existingResult, newResult)
+		if existingResult != newResult {
+			t.Errorf("results differ: existing=%v, new=%v", existingResult, newResult)
 		}
 
 		if existingResult {
@@ -148,15 +148,15 @@ func TestSecp256k1SchnorrsigVerifyComparison(t *testing.T) {
 		var secp_xonly secp256k1_xonly_pubkey
 		copy(secp_xonly.data[:], xonly.data[:])
 
-		// Test existing implementation
-		existingResult := SchnorrVerify(wrongSig, msg, xonly)
+		// Test existing implementation (old)
+		existingResult := SchnorrVerifyOld(wrongSig, msg, xonly)
 
-		// Test new implementation
-		newResult := secp256k1_schnorrsig_verify(ctx, wrongSig, msg, len(msg), &secp_xonly)
+		// Test new implementation (C-translated)
+		newResult := SchnorrVerify(wrongSig, msg, xonly)
 
 		// Compare results
-		if existingResult != (newResult != 0) {
-			t.Errorf("results differ: existing=%v, new=%d", existingResult, newResult)
+		if existingResult != newResult {
+			t.Errorf("results differ: existing=%v, new=%v", existingResult, newResult)
 		}
 
 		if existingResult {
@@ -201,15 +201,15 @@ func TestSecp256k1SchnorrsigVerifyComparison(t *testing.T) {
 		var secp_xonly2 secp256k1_xonly_pubkey
 		copy(secp_xonly2.data[:], xonly2.data[:])
 
-		// Test existing implementation (verify with wrong pubkey)
-		existingResult := SchnorrVerify(sig[:], msg, xonly2)
+		// Test existing implementation (old, verify with wrong pubkey)
+		existingResult := SchnorrVerifyOld(sig[:], msg, xonly2)
 
-		// Test new implementation (verify with wrong pubkey)
-		newResult := secp256k1_schnorrsig_verify(ctx, sig[:], msg, len(msg), &secp_xonly2)
+		// Test new implementation (C-translated, verify with wrong pubkey)
+		newResult := SchnorrVerify(sig[:], msg, xonly2)
 
 		// Compare results
-		if existingResult != (newResult != 0) {
-			t.Errorf("results differ: existing=%v, new=%d", existingResult, newResult)
+		if existingResult != newResult {
+			t.Errorf("results differ: existing=%v, new=%v", existingResult, newResult)
 		}
 
 		if existingResult {
@@ -352,15 +352,15 @@ func TestSecp256k1SchnorrsigVerifyComparison(t *testing.T) {
 		var secp_xonly secp256k1_xonly_pubkey
 		copy(secp_xonly.data[:], xonly.data[:])
 
-		// Test existing implementation
-		existingResult := SchnorrVerify(sig[:], msg, xonly)
+		// Test existing implementation (old)
+		existingResult := SchnorrVerifyOld(sig[:], msg, xonly)
 
-		// Test new implementation
-		newResult := secp256k1_schnorrsig_verify(ctx, sig[:], msg, len(msg), &secp_xonly)
+		// Test new implementation (C-translated)
+		newResult := SchnorrVerify(sig[:], msg, xonly)
 
 		// Compare results
-		if existingResult != (newResult != 0) {
-			t.Errorf("results differ: existing=%v, new=%d", existingResult, newResult)
+		if existingResult != newResult {
+			t.Errorf("results differ: existing=%v, new=%v", existingResult, newResult)
 		}
 
 		if !existingResult {

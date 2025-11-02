@@ -182,8 +182,9 @@ func SchnorrSign(sig64 []byte, msg32 []byte, keypair *KeyPair, auxRand32 []byte)
 	return nil
 }
 
-// SchnorrVerify verifies a Schnorr signature following BIP-340
-func SchnorrVerify(sig64 []byte, msg32 []byte, xonlyPubkey *XOnlyPubkey) bool {
+// SchnorrVerifyOld is the deprecated original implementation of SchnorrVerify.
+// Deprecated: Use SchnorrVerify instead, which uses the C-translated implementation.
+func SchnorrVerifyOld(sig64 []byte, msg32 []byte, xonlyPubkey *XOnlyPubkey) bool {
 	if len(sig64) != 64 {
 		return false
 	}
@@ -290,4 +291,32 @@ func SchnorrVerify(sig64 []byte, msg32 []byte, xonlyPubkey *XOnlyPubkey) bool {
 	}
 
 	return true
+}
+
+// SchnorrVerify verifies a Schnorr signature following BIP-340.
+// This is the new implementation translated from C secp256k1_schnorrsig_verify.
+func SchnorrVerify(sig64 []byte, msg32 []byte, xonlyPubkey *XOnlyPubkey) bool {
+	if len(sig64) != 64 {
+		return false
+	}
+	if len(msg32) != 32 {
+		return false
+	}
+	if xonlyPubkey == nil {
+		return false
+	}
+
+	// Create a context (required by secp256k1_schnorrsig_verify)
+	ctx := &secp256k1_context{
+		ecmult_gen_ctx: secp256k1_ecmult_gen_context{built: 1},
+		declassify:     0,
+	}
+
+	// Convert x-only pubkey to secp256k1_xonly_pubkey format
+	var secp_xonly secp256k1_xonly_pubkey
+	copy(secp_xonly.data[:], xonlyPubkey.data[:])
+
+	// Call the C-translated verification function
+	result := secp256k1_schnorrsig_verify(ctx, sig64, msg32, len(msg32), &secp_xonly)
+	return result != 0
 }

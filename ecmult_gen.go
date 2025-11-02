@@ -136,9 +136,14 @@ func (ctx *EcmultGenContext) ecmultGen(r *GroupElementJacobian, n *Scalar) {
 	// For each byte, lookup the precomputed point and add it
 	r.setInfinity()
 
-	// Get scalar bytes (MSB to LSB)
+	// Get scalar bytes (MSB to LSB) - optimize by getting bytes directly
 	var scalarBytes [32]byte
 	n.getB32(scalarBytes[:])
+
+	// Pre-allocate group elements to avoid repeated allocations
+	var ptAff GroupElementAffine
+	var ptJac GroupElementJacobian
+	var xFe, yFe FieldElement
 
 	for byteNum := 0; byteNum < numBytes; byteNum++ {
 		byteVal := scalarBytes[byteNum]
@@ -148,15 +153,12 @@ func (ctx *EcmultGenContext) ecmultGen(r *GroupElementJacobian, n *Scalar) {
 			continue
 		}
 
-		// Lookup precomputed point for this byte
-		var ptAff GroupElementAffine
-		var xFe, yFe FieldElement
+		// Lookup precomputed point for this byte - optimized: reuse field elements
 		xFe.setB32(ctx.bytePoints[byteNum][byteVal][0][:])
 		yFe.setB32(ctx.bytePoints[byteNum][byteVal][1][:])
 		ptAff.setXY(&xFe, &yFe)
 
-		// Convert to Jacobian and add
-		var ptJac GroupElementJacobian
+		// Convert to Jacobian and add - optimized: reuse Jacobian element
 		ptJac.setGE(&ptAff)
 
 		if r.isInfinity() {

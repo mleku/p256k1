@@ -1,6 +1,7 @@
 package p256k1
 
 import (
+	"crypto/sha256"
 	"unsafe"
 )
 
@@ -854,17 +855,45 @@ func secp256k1_schnorrsig_sha256_tagged(sha *secp256k1_sha256) {
 
 // secp256k1_schnorrsig_challenge computes challenge hash
 func secp256k1_schnorrsig_challenge(e *secp256k1_scalar, r32 []byte, msg []byte, msglen int, pubkey32 []byte) {
-	// Use TaggedHash for BIP-340 compatibility
-	var challengeInput []byte
-	challengeInput = append(challengeInput, r32[:32]...)
-	challengeInput = append(challengeInput, pubkey32[:32]...)
-	challengeInput = append(challengeInput, msg[:msglen]...)
+	// Optimized challenge computation - avoid allocations by writing directly to hash
+	var challengeHash [32]byte
 
-	challengeHash := TaggedHash(bip340ChallengeTag, challengeInput)
+	// First hash: SHA256(tag)
+	tagHash := sha256.Sum256(bip340ChallengeTag)
 
-	var s Scalar
-	s.setB32(challengeHash[:])
-	e.d = s.d
+	// Second hash: SHA256(SHA256(tag) || SHA256(tag) || r32 || pubkey32 || msg)
+	h := sha256.New()
+	h.Write(tagHash[:])    // SHA256(tag)
+	h.Write(tagHash[:])    // SHA256(tag) again
+	h.Write(r32[:32])      // r32
+	h.Write(pubkey32[:32]) // pubkey32
+	h.Write(msg[:msglen])  // msg
+	copy(challengeHash[:], h.Sum(nil))
+
+	// Convert hash to scalar directly - avoid intermediate Scalar by setting directly
+	e.d[0] = uint64(challengeHash[31]) | uint64(challengeHash[30])<<8 | uint64(challengeHash[29])<<16 | uint64(challengeHash[28])<<24 |
+		uint64(challengeHash[27])<<32 | uint64(challengeHash[26])<<40 | uint64(challengeHash[25])<<48 | uint64(challengeHash[24])<<56
+	e.d[1] = uint64(challengeHash[23]) | uint64(challengeHash[22])<<8 | uint64(challengeHash[21])<<16 | uint64(challengeHash[20])<<24 |
+		uint64(challengeHash[19])<<32 | uint64(challengeHash[18])<<40 | uint64(challengeHash[17])<<48 | uint64(challengeHash[16])<<56
+	e.d[2] = uint64(challengeHash[15]) | uint64(challengeHash[14])<<8 | uint64(challengeHash[13])<<16 | uint64(challengeHash[12])<<24 |
+		uint64(challengeHash[11])<<32 | uint64(challengeHash[10])<<40 | uint64(challengeHash[9])<<48 | uint64(challengeHash[8])<<56
+	e.d[3] = uint64(challengeHash[7]) | uint64(challengeHash[6])<<8 | uint64(challengeHash[5])<<16 | uint64(challengeHash[4])<<24 |
+		uint64(challengeHash[3])<<32 | uint64(challengeHash[2])<<40 | uint64(challengeHash[1])<<48 | uint64(challengeHash[0])<<56
+
+	// Check overflow inline (same logic as Scalar.checkOverflow) and reduce if needed
+	yes := 0
+	no := 0
+	no |= boolToInt(e.d[3] < scalarN3)
+	yes |= boolToInt(e.d[2] > scalarN2) & (^no)
+	no |= boolToInt(e.d[2] < scalarN2)
+	yes |= boolToInt(e.d[1] > scalarN1) & (^no)
+	no |= boolToInt(e.d[1] < scalarN1)
+	yes |= boolToInt(e.d[0] >= scalarN0) & (^no)
+
+	if yes != 0 {
+		// Reduce inline using secp256k1_scalar_reduce logic
+		secp256k1_scalar_reduce(e, 1)
+	}
 }
 
 // secp256k1_schnorrsig_verify verifies a Schnorr signature
@@ -876,7 +905,6 @@ func secp256k1_schnorrsig_verify(ctx *secp256k1_context, sig64 []byte, msg []byt
 	var pkj secp256k1_gej
 	var rx secp256k1_fe
 	var r secp256k1_ge
-	var buf [32]byte
 	var overflow int
 
 	if ctx == nil {
@@ -910,10 +938,11 @@ func secp256k1_schnorrsig_verify(ctx *secp256k1_context, sig64 []byte, msg []byt
 		return 0
 	}
 
-	// Compute e
+	// Compute e - extract normalized pk.x bytes efficiently
 	secp256k1_fe_normalize_var(&pk.x)
-	secp256k1_fe_get_b32(buf[:], &pk.x)
-	secp256k1_schnorrsig_challenge(&e, sig64[:32], msg, msglen, buf[:])
+	var pkXBytes [32]byte
+	secp256k1_fe_get_b32(pkXBytes[:], &pk.x)
+	secp256k1_schnorrsig_challenge(&e, sig64[:32], msg, msglen, pkXBytes[:])
 
 	// Compute rj = s*G + (-e)*pkj
 	secp256k1_scalar_negate(&e, &e)
@@ -925,11 +954,13 @@ func secp256k1_schnorrsig_verify(ctx *secp256k1_context, sig64 []byte, msg []byt
 		return 0
 	}
 
+	// Optimize: normalize r.y only once and check if odd
 	secp256k1_fe_normalize_var(&r.y)
 	if secp256k1_fe_is_odd(&r.y) {
 		return 0
 	}
 
+	// Optimize: normalize r.x and rx only once before comparison
 	secp256k1_fe_normalize_var(&r.x)
 	secp256k1_fe_normalize_var(&rx)
 	if !secp256k1_fe_equal(&rx, &r.x) {

@@ -56,17 +56,26 @@ func (u uint128) rshift(n uint) uint128 {
 
 // mul multiplies two field elements: r = a * b
 // This implementation follows the C secp256k1_fe_mul_inner algorithm
+// Optimized: avoid copies when magnitude is low enough
 func (r *FieldElement) mul(a, b *FieldElement) {
-	// Normalize inputs if magnitude is too high
-	var aNorm, bNorm FieldElement
-	aNorm = *a
-	bNorm = *b
-
-	if aNorm.magnitude > 8 {
-		aNorm.normalizeWeak()
+	// Use pointers directly if magnitude is low enough (optimization)
+	var aNorm, bNorm *FieldElement
+	var aTemp, bTemp FieldElement
+	
+	if a.magnitude > 8 {
+		aTemp = *a
+		aTemp.normalizeWeak()
+		aNorm = &aTemp
+	} else {
+		aNorm = a // Use directly, no copy needed
 	}
-	if bNorm.magnitude > 8 {
-		bNorm.normalizeWeak()
+	
+	if b.magnitude > 8 {
+		bTemp = *b
+		bTemp.normalizeWeak()
+		bNorm = &bTemp
+	} else {
+		bNorm = b // Use directly, no copy needed
 	}
 
 	// Extract limbs for easier access
@@ -284,13 +293,18 @@ func (r *FieldElement) reduceFromWide(t [10]uint64) {
 
 // sqr squares a field element: r = a^2
 // This implementation follows the C secp256k1_fe_sqr_inner algorithm
+// Optimized: avoid copies when magnitude is low enough
 func (r *FieldElement) sqr(a *FieldElement) {
-	// Normalize input if magnitude is too high
-	var aNorm FieldElement
-	aNorm = *a
-
-	if aNorm.magnitude > 8 {
-		aNorm.normalizeWeak()
+	// Use pointer directly if magnitude is low enough (optimization)
+	var aNorm *FieldElement
+	var aTemp FieldElement
+	
+	if a.magnitude > 8 {
+		aTemp = *a
+		aTemp.normalizeWeak()
+		aNorm = &aTemp
+	} else {
+		aNorm = a // Use directly, no copy needed
 	}
 
 	// Extract limbs for easier access

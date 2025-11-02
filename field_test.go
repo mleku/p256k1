@@ -244,3 +244,151 @@ func TestFieldElementClear(t *testing.T) {
 		t.Error("Cleared field element should be normalized")
 	}
 }
+
+// TestMontgomery tests Montgomery multiplication (currently disabled due to incomplete implementation)
+// TODO: Re-enable once Montgomery multiplication is fully implemented
+func TestMontgomery(t *testing.T) {
+	t.Skip("Montgomery multiplication implementation is incomplete - see MONTGOMERY_NOTES.md")
+	
+	// Test Montgomery conversion round-trip
+	t.Run("RoundTrip", func(t *testing.T) {
+		var a, b FieldElement
+		a.setInt(123)
+		b.setInt(456)
+		a.normalize()
+		b.normalize()
+
+		// Convert to Montgomery form
+		aMont := a.ToMontgomery()
+		bMont := b.ToMontgomery()
+
+		// Convert back
+		aBack := aMont.FromMontgomery()
+		bBack := bMont.FromMontgomery()
+
+		// Normalize for comparison
+		aBack.normalize()
+		bBack.normalize()
+
+		if !aBack.equal(&a) {
+			t.Errorf("Round-trip conversion failed for a: got %x, want %x", aBack.n, a.n)
+		}
+		if !bBack.equal(&b) {
+			t.Errorf("Round-trip conversion failed for b: got %x, want %x", bBack.n, b.n)
+		}
+	})
+
+	// Test Montgomery multiplication correctness
+	t.Run("Multiplication", func(t *testing.T) {
+		testCases := []struct {
+			name string
+			a, b int
+		}{
+			{"small", 123, 456},
+			{"medium", 1000, 2000},
+			{"one", 1, 1},
+			{"zero_a", 0, 123},
+			{"zero_b", 123, 0},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				var a, b FieldElement
+				a.setInt(tc.a)
+				b.setInt(tc.b)
+				a.normalize()
+				b.normalize()
+
+				// Standard multiplication
+				var stdResult FieldElement
+				stdResult.mul(&a, &b)
+				stdResult.normalize()
+
+				// Montgomery multiplication
+				aMont := a.ToMontgomery()
+				bMont := b.ToMontgomery()
+				montResult := MontgomeryMul(aMont, bMont)
+				montResult = montResult.FromMontgomery()
+				montResult.normalize()
+
+				if !montResult.equal(&stdResult) {
+					t.Errorf("Montgomery multiplication failed for %d * %d:\nGot:  %x\nWant: %x",
+						tc.a, tc.b, montResult.n, stdResult.n)
+				}
+			})
+		}
+	})
+
+	// Test Montgomery multiplication with field modulus boundary values
+	t.Run("BoundaryValues", func(t *testing.T) {
+		// Test with p-1
+		pMinus1Bytes := [32]byte{
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFE, 0xFF, 0xFF, 0xFC, 0x2E,
+		}
+
+		var pMinus1 FieldElement
+		pMinus1.setB32(pMinus1Bytes[:])
+		pMinus1.normalize()
+
+		// (p-1) * (p-1) should equal 1 mod p
+		var expected FieldElement
+		expected.setInt(1)
+		expected.normalize()
+
+		// Standard multiplication
+		var stdResult FieldElement
+		stdResult.mul(&pMinus1, &pMinus1)
+		stdResult.normalize()
+
+		// Montgomery multiplication
+		pMinus1Mont := pMinus1.ToMontgomery()
+		montResult := MontgomeryMul(pMinus1Mont, pMinus1Mont)
+		montResult = montResult.FromMontgomery()
+		montResult.normalize()
+
+		if !montResult.equal(&expected) {
+			t.Errorf("Montgomery multiplication failed for (p-1)*(p-1):\nGot:  %x\nWant: %x",
+				montResult.n, expected.n)
+		}
+
+		if !stdResult.equal(&expected) {
+			t.Errorf("Standard multiplication failed for (p-1)*(p-1):\nGot:  %x\nWant: %x",
+				stdResult.n, expected.n)
+		}
+	})
+
+	// Test multiple Montgomery multiplications in sequence
+	t.Run("SequentialMultiplications", func(t *testing.T) {
+		var a, b, c FieldElement
+		a.setInt(123)
+		b.setInt(456)
+		c.setInt(789)
+		a.normalize()
+		b.normalize()
+		c.normalize()
+
+		// Standard: (a * b) * c
+		var stdResult FieldElement
+		stdResult.mul(&a, &b)
+		stdResult.mul(&stdResult, &c)
+		stdResult.normalize()
+
+		// Montgomery: convert once, multiply multiple times
+		aMont := a.ToMontgomery()
+		bMont := b.ToMontgomery()
+		cMont := c.ToMontgomery()
+
+		montResult := MontgomeryMul(aMont, bMont)
+		montResult = MontgomeryMul(montResult, cMont)
+		montResult = montResult.FromMontgomery()
+		montResult.normalize()
+
+		if !montResult.equal(&stdResult) {
+			t.Errorf("Sequential Montgomery multiplication failed:\nGot:  %x\nWant: %x",
+				montResult.n, stdResult.n)
+		}
+	})
+}

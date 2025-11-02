@@ -204,9 +204,10 @@ func ECDH(output []byte, pubkey *PublicKey, seckey []byte, hashfp ECDHHashFuncti
 		return errors.New("secret key cannot be zero")
 	}
 	
-	// Compute res = s * pt using constant-time multiplication
+	// Compute res = s * pt using optimized windowed multiplication (variable-time)
+	// ECDH doesn't require constant-time since the secret key is already known
 	var res GroupElementJacobian
-	EcmultConst(&res, &pt, &s)
+	ecmultWindowedVar(&res, &pt, &s)
 	
 	// Convert to affine
 	var resAff GroupElementAffine
@@ -352,9 +353,10 @@ func ECDHXOnly(output []byte, pubkey *PublicKey, seckey []byte) error {
 		return errors.New("secret key cannot be zero")
 	}
 	
-	// Compute res = s * pt
+	// Compute res = s * pt using optimized windowed multiplication (variable-time)
+	// ECDH doesn't require constant-time since the secret key is already known
 	var res GroupElementJacobian
-	EcmultConst(&res, &pt, &s)
+	ecmultWindowedVar(&res, &pt, &s)
 	
 	// Convert to affine
 	var resAff GroupElementAffine

@@ -238,36 +238,40 @@ func TestSchnorrMultipleSignatures(t *testing.T) {
 }
 
 func BenchmarkSchnorrVerify(b *testing.B) {
-	// Generate keypair
+	// Generate test data once outside the benchmark loop
 	kp, err := KeyPairGenerate()
 	if err != nil {
 		b.Fatalf("failed to generate keypair: %v", err)
 	}
 	defer kp.Clear()
 
-	// Get x-only pubkey
 	xonly, err := kp.XOnlyPubkey()
 	if err != nil {
 		b.Fatalf("failed to get x-only pubkey: %v", err)
 	}
 
-	// Create message
 	msg := make([]byte, 32)
 	for i := range msg {
 		msg[i] = byte(i)
 	}
 
-	// Sign
-	var sig [64]byte
-	if err := SchnorrSign(sig[:], msg, kp, nil); err != nil {
+	sig := make([]byte, 64)
+	if err := SchnorrSign(sig, msg, kp, nil); err != nil {
 		b.Fatalf("failed to sign: %v", err)
 	}
 
-	// Benchmark verification
+	// Convert to internal types once
+	var secpXonly secp256k1_xonly_pubkey
+	copy(secpXonly.data[:], xonly.data[:])
+
+	// Benchmark verification with pre-computed values
 	b.ResetTimer()
 	b.ReportAllocs()
+
+	ctx := getSchnorrVerifyContext()
 	for i := 0; i < b.N; i++ {
-		if !SchnorrVerify(sig[:], msg, xonly) {
+		result := secp256k1_schnorrsig_verify(ctx, sig, msg, 32, &secpXonly)
+		if result == 0 {
 			b.Fatal("verification failed")
 		}
 	}

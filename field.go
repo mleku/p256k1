@@ -544,6 +544,185 @@ func montgomeryReduce(t [10]uint64) *FieldElement {
 	
 	// Final reduction if needed (result might be >= p)
 	result.normalize()
-	
+
 	return &result
+}
+
+// Direct function versions to reduce method call overhead
+
+// fieldNormalize normalizes a field element
+func fieldNormalize(r *FieldElement) {
+	t0, t1, t2, t3, t4 := r.n[0], r.n[1], r.n[2], r.n[3], r.n[4]
+
+	// Reduce t4 at the start so there will be at most a single carry from the first pass
+	x := t4 >> 48
+	t4 &= limb4Max
+
+	// First pass ensures magnitude is 1
+	t0 += x * fieldReductionConstant
+	t1 += t0 >> 52
+	t0 &= limb0Max
+	t2 += t1 >> 52
+	t1 &= limb0Max
+	m := t1
+	t3 += t2 >> 52
+	t2 &= limb0Max
+	m &= t2
+	t4 += t3 >> 52
+	t3 &= limb0Max
+	m &= t3
+
+	// Check if we need final reduction
+	needReduction := 0
+	if t4 == limb4Max && m == limb0Max && t0 >= fieldModulusLimb0 {
+		needReduction = 1
+	}
+
+	// Conditional final reduction
+	t0 += uint64(needReduction) * fieldReductionConstant
+	t1 += t0 >> 52
+	t0 &= limb0Max
+	t2 += t1 >> 52
+	t1 &= limb0Max
+	t3 += t2 >> 52
+	t2 &= limb0Max
+	t4 += t3 >> 52
+	t3 &= limb0Max
+	t4 &= limb4Max
+
+	r.n[0], r.n[1], r.n[2], r.n[3], r.n[4] = t0, t1, t2, t3, t4
+	r.magnitude = 1
+	r.normalized = true
+}
+
+// fieldNormalizeWeak normalizes a field element weakly (magnitude <= 1)
+func fieldNormalizeWeak(r *FieldElement) {
+	t0, t1, t2, t3, t4 := r.n[0], r.n[1], r.n[2], r.n[3], r.n[4]
+
+	// Reduce t4 at the start so there will be at most a single carry from the first pass
+	x := t4 >> 48
+	t4 &= limb4Max
+
+	// First pass ensures magnitude is 1
+	t0 += x * fieldReductionConstant
+	t1 += t0 >> 52
+	t0 &= limb0Max
+	t2 += t1 >> 52
+	t1 &= limb0Max
+	t3 += t2 >> 52
+	t2 &= limb0Max
+	t4 += t3 >> 52
+	t3 &= limb0Max
+
+	t4 &= limb4Max
+
+	r.n[0], r.n[1], r.n[2], r.n[3], r.n[4] = t0, t1, t2, t3, t4
+	r.magnitude = 1
+	r.normalized = false
+}
+
+// fieldAdd adds two field elements
+func fieldAdd(r, a *FieldElement) {
+	r.n[0] += a.n[0]
+	r.n[1] += a.n[1]
+	r.n[2] += a.n[2]
+	r.n[3] += a.n[3]
+	r.n[4] += a.n[4]
+
+	// Update magnitude
+	if r.magnitude < 8 && a.magnitude < 8 {
+		r.magnitude += a.magnitude
+	} else {
+		r.magnitude = 8
+	}
+	r.normalized = false
+}
+
+// fieldIsZero checks if field element is zero
+func fieldIsZero(a *FieldElement) bool {
+	if !a.normalized {
+		panic("field element must be normalized")
+	}
+	return a.n[0] == 0 && a.n[1] == 0 && a.n[2] == 0 && a.n[3] == 0 && a.n[4] == 0
+}
+
+// fieldGetB32 serializes field element to 32 bytes
+func fieldGetB32(b []byte, a *FieldElement) {
+	if len(b) != 32 {
+		panic("field element byte array must be 32 bytes")
+	}
+
+	// Normalize first
+	var normalized FieldElement
+	normalized = *a
+	fieldNormalize(&normalized)
+
+	// Convert from 5x52 to 4x64 limbs
+	var d [4]uint64
+	d[0] = normalized.n[0] | (normalized.n[1] << 52)
+	d[1] = (normalized.n[1] >> 12) | (normalized.n[2] << 40)
+	d[2] = (normalized.n[2] >> 24) | (normalized.n[3] << 28)
+	d[3] = (normalized.n[3] >> 36) | (normalized.n[4] << 16)
+
+	// Convert to big-endian bytes
+	for i := 0; i < 4; i++ {
+		b[31-8*i] = byte(d[i])
+		b[30-8*i] = byte(d[i] >> 8)
+		b[29-8*i] = byte(d[i] >> 16)
+		b[28-8*i] = byte(d[i] >> 24)
+		b[27-8*i] = byte(d[i] >> 32)
+		b[26-8*i] = byte(d[i] >> 40)
+		b[25-8*i] = byte(d[i] >> 48)
+		b[24-8*i] = byte(d[i] >> 56)
+	}
+}
+
+// fieldMul multiplies two field elements (array version)
+func fieldMul(r, a, b []uint64) {
+	if len(r) < 5 || len(a) < 5 || len(b) < 5 {
+		return
+	}
+
+	var fea, feb, fer FieldElement
+	copy(fea.n[:], a)
+	copy(feb.n[:], b)
+	fer.mul(&fea, &feb)
+	r[0], r[1], r[2], r[3], r[4] = fer.n[0], fer.n[1], fer.n[2], fer.n[3], fer.n[4]
+}
+
+// fieldSqr squares a field element (array version)
+func fieldSqr(r, a []uint64) {
+	if len(r) < 5 || len(a) < 5 {
+		return
+	}
+
+	var fea, fer FieldElement
+	copy(fea.n[:], a)
+	fer.sqr(&fea)
+	r[0], r[1], r[2], r[3], r[4] = fer.n[0], fer.n[1], fer.n[2], fer.n[3], fer.n[4]
+}
+
+// fieldInvVar computes modular inverse using Fermat's little theorem
+func fieldInvVar(r, a []uint64) {
+	if len(r) < 5 || len(a) < 5 {
+		return
+	}
+
+	var fea, fer FieldElement
+	copy(fea.n[:], a)
+	fer.inv(&fea)
+	r[0], r[1], r[2], r[3], r[4] = fer.n[0], fer.n[1], fer.n[2], fer.n[3], fer.n[4]
+}
+
+// fieldSqrt computes square root of field element
+func fieldSqrt(r, a []uint64) bool {
+	if len(r) < 5 || len(a) < 5 {
+		return false
+	}
+
+	var fea, fer FieldElement
+	copy(fea.n[:], a)
+	result := fer.sqrt(&fea)
+	r[0], r[1], r[2], r[3], r[4] = fer.n[0], fer.n[1], fer.n[2], fer.n[3], fer.n[4]
+	return result
 }

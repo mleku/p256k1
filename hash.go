@@ -267,6 +267,19 @@ func (rng *RFC6979HMACSHA256) Clear() {
 // TaggedHash computes SHA256(SHA256(tag) || SHA256(tag) || data)
 // This is used in BIP-340 for Schnorr signatures
 // Optimized to use precomputed tag hashes for common BIP-340 tags
+// Global pre-allocated hash context for TaggedHash to avoid allocations
+var (
+	taggedHashContext     hash.Hash
+	taggedHashContextOnce sync.Once
+)
+
+func getTaggedHashContext() hash.Hash {
+	taggedHashContextOnce.Do(func() {
+		taggedHashContext = sha256.New()
+	})
+	return taggedHashContext
+}
+
 func TaggedHash(tag []byte, data []byte) [32]byte {
 	var result [32]byte
 
@@ -274,11 +287,13 @@ func TaggedHash(tag []byte, data []byte) [32]byte {
 	tagHash := getTaggedHashPrefix(tag)
 
 	// Second hash: SHA256(SHA256(tag) || SHA256(tag) || data)
-	h := sha256.New()
+	// Use pre-allocated hash context to avoid allocations
+	h := getTaggedHashContext()
+	h.Reset()
 	h.Write(tagHash[:]) // SHA256(tag)
 	h.Write(tagHash[:]) // SHA256(tag) again
 	h.Write(data)       // data
-	copy(result[:], h.Sum(nil))
+	h.Sum(result[:0])   // Sum directly into result without allocation
 
 	return result
 }

@@ -250,12 +250,14 @@ func secp256k1_scalar_set_b32(r *secp256k1_scalar, b32 []byte, overflow *int) {
 func secp256k1_scalar_get_b32(bin []byte, a *secp256k1_scalar) {
 	var s Scalar
 	s.d = a.d
-	s.getB32(bin)
+	scalarGetB32(bin, &s)
 }
 
 // secp256k1_scalar_is_zero checks if scalar is zero
 func secp256k1_scalar_is_zero(a *secp256k1_scalar) bool {
-	return (a.d[0] | a.d[1] | a.d[2] | a.d[3]) == 0
+	var s Scalar
+	s.d = a.d
+	return scalarIsZero(&s)
 }
 
 // secp256k1_scalar_negate negates scalar
@@ -274,7 +276,7 @@ func secp256k1_scalar_add(r *secp256k1_scalar, a *secp256k1_scalar, b *secp256k1
 	sa.d = a.d
 	sb.d = b.d
 	var sr Scalar
-	overflow := sr.add(&sa, &sb)
+	overflow := scalarAdd(&sr, &sa, &sb)
 	r.d = sr.d
 	return overflow
 }
@@ -285,7 +287,7 @@ func secp256k1_scalar_mul(r *secp256k1_scalar, a *secp256k1_scalar, b *secp256k1
 	sa.d = a.d
 	sb.d = b.d
 	var sr Scalar
-	sr.mul(&sa, &sb)
+	scalarMul(&sr, &sa, &sb)
 	r.d = sr.d
 }
 
@@ -359,7 +361,7 @@ func secp256k1_fe_is_odd(a *secp256k1_fe) bool {
 func secp256k1_fe_normalize_var(r *secp256k1_fe) {
 	var fe FieldElement
 	fe.n = r.n
-	fe.normalize()
+	fieldNormalize(&fe)
 	r.n = fe.n
 }
 
@@ -394,7 +396,7 @@ func secp256k1_fe_add(r *secp256k1_fe, a *secp256k1_fe) {
 	fe.n = r.n
 	var fea FieldElement
 	fea.n = a.n
-	fe.add(&fea)
+	fieldAdd(&fe, &fea)
 	r.n = fe.n
 }
 
@@ -440,7 +442,7 @@ func secp256k1_fe_set_b32_limit(r *secp256k1_fe, a []byte) bool {
 func secp256k1_fe_get_b32(r []byte, a *secp256k1_fe) {
 	var fe FieldElement
 	fe.n = a.n
-	fe.getB32(r)
+	fieldGetB32(r, &fe)
 }
 
 // secp256k1_fe_equal checks if two field elements are equal
@@ -473,18 +475,18 @@ func secp256k1_fe_sqrt(r *secp256k1_fe, a *secp256k1_fe) bool {
 // secp256k1_fe_mul multiplies field elements
 func secp256k1_fe_mul(r *secp256k1_fe, a *secp256k1_fe, b *secp256k1_fe) {
 	var fea, feb, fer FieldElement
-	fea.n = a.n
-	feb.n = b.n
+	copy(fea.n[:], a.n[:])
+	copy(feb.n[:], b.n[:])
 	fer.mul(&fea, &feb)
-	r.n = fer.n
+	copy(r.n[:], fer.n[:])
 }
 
 // secp256k1_fe_sqr squares field element
 func secp256k1_fe_sqr(r *secp256k1_fe, a *secp256k1_fe) {
 	var fea, fer FieldElement
-	fea.n = a.n
+	copy(fea.n[:], a.n[:])
 	fer.sqr(&fea)
-	r.n = fer.n
+	copy(r.n[:], fer.n[:])
 }
 
 // secp256k1_fe_inv_var computes field element inverse
@@ -918,22 +920,28 @@ func secp256k1_schnorrsig_sha256_tagged(sha *secp256k1_sha256) {
 
 // secp256k1_schnorrsig_challenge computes challenge hash
 func secp256k1_schnorrsig_challenge(e *secp256k1_scalar, r32 []byte, msg []byte, msglen int, pubkey32 []byte) {
-	// Optimized challenge computation using pre-allocated hash context to avoid allocations
+	// Zero-allocation challenge computation
 	var challengeHash [32]byte
+	var tagHash [32]byte
 
-	// First hash: SHA256(tag)
-	tagHash := sha256.Sum256(bip340ChallengeTag)
+	// Use pre-allocated hash context for both hashes to avoid allocations
+	h := getChallengeHashContext()
+
+	// First hash: SHA256(tag) - use Sum256 directly to avoid hash context
+	tagHash = sha256.Sum256(bip340ChallengeTag)
 
 	// Second hash: SHA256(SHA256(tag) || SHA256(tag) || r32 || pubkey32 || msg)
-	// Use pre-allocated hash context to avoid allocations
-	h := getChallengeHashContext()
 	h.Reset()
 	h.Write(tagHash[:])    // SHA256(tag)
 	h.Write(tagHash[:])    // SHA256(tag) again
 	h.Write(r32[:32])      // r32
 	h.Write(pubkey32[:32]) // pubkey32
 	h.Write(msg[:msglen])  // msg
-	copy(challengeHash[:], h.Sum(nil))
+
+	// Sum into a temporary buffer, then copy
+	var temp [32]byte
+	h.Sum(temp[:0])
+	copy(challengeHash[:], temp[:])
 
 	// Convert hash to scalar directly - avoid intermediate Scalar by setting directly
 	e.d[0] = uint64(challengeHash[31]) | uint64(challengeHash[30])<<8 | uint64(challengeHash[29])<<16 | uint64(challengeHash[28])<<24 |
@@ -959,6 +967,271 @@ func secp256k1_schnorrsig_challenge(e *secp256k1_scalar, r32 []byte, msg []byte,
 		// Reduce inline using secp256k1_scalar_reduce logic
 		secp256k1_scalar_reduce(e, 1)
 	}
+}
+
+// Direct array-based implementations to avoid struct allocations
+
+// feSetB32Limit sets field element from 32 bytes with limit check
+func feSetB32Limit(r []uint64, b []byte) bool {
+	if len(r) < 5 || len(b) < 32 {
+		return false
+	}
+
+	r[0] = (uint64(b[31]) | uint64(b[30])<<8 | uint64(b[29])<<16 | uint64(b[28])<<24 |
+		uint64(b[27])<<32 | uint64(b[26])<<40 | uint64(b[25])<<48 | uint64(b[24])<<56)
+	r[1] = (uint64(b[23]) | uint64(b[22])<<8 | uint64(b[21])<<16 | uint64(b[20])<<24 |
+		uint64(b[19])<<32 | uint64(b[18])<<40 | uint64(b[17])<<48 | uint64(b[16])<<56)
+	r[2] = (uint64(b[15]) | uint64(b[14])<<8 | uint64(b[13])<<16 | uint64(b[12])<<24 |
+		uint64(b[11])<<32 | uint64(b[10])<<40 | uint64(b[9])<<48 | uint64(b[8])<<56)
+	r[3] = (uint64(b[7]) | uint64(b[6])<<8 | uint64(b[5])<<16 | uint64(b[4])<<24 |
+		uint64(b[3])<<32 | uint64(b[2])<<40 | uint64(b[1])<<48 | uint64(b[0])<<56)
+	r[4] = 0
+
+	return !((r[4] == 0x0FFFFFFFFFFFF) && ((r[3] & r[2] & r[1]) == 0xFFFFFFFFFFFF) && (r[0] >= 0xFFFFEFFFFFC2F))
+}
+
+// xonlyPubkeyLoad loads x-only public key into arrays
+func xonlyPubkeyLoad(pkx, pky []uint64, pkInf *int, pubkey *secp256k1_xonly_pubkey) bool {
+	if len(pkx) < 5 || len(pky) < 5 {
+		return false
+	}
+
+	// Set x coordinate from pubkey data
+	if !feSetB32Limit(pkx, pubkey.data[:32]) {
+		return false
+	}
+
+	// Compute y^2 = x^3 + 7
+	var x2, x3, y2 [5]uint64
+	fieldSqr(x2[:], pkx)
+	fieldMul(x3[:], x2[:], pkx)
+	// Add 7 (which is 111 in binary, so add 1 seven times)
+	x3[0] += 7
+	fieldSqr(y2[:], x3[:])
+
+	// Check if y^2 is quadratic residue (has square root)
+	if !fieldSqrt(pky, y2[:]) {
+		return false
+	}
+
+	*pkInf = 0
+	return true
+}
+
+// schnorrsigChallenge computes challenge directly into array
+func schnorrsigChallenge(e []uint64, r32 []byte, msg []byte, msglen int, pubkey32 []byte) {
+	if len(e) < 4 {
+		return
+	}
+
+	// Zero-allocation challenge computation
+	var challengeHash [32]byte
+	var tagHash [32]byte
+
+	// First hash: SHA256(tag)
+	tagHash = sha256.Sum256(bip340ChallengeTag)
+
+	// Second hash: SHA256(SHA256(tag) || SHA256(tag) || r32 || pubkey32 || msg)
+	h := getChallengeHashContext()
+	h.Reset()
+	h.Write(tagHash[:])    // SHA256(tag)
+	h.Write(tagHash[:])    // SHA256(tag) again
+	h.Write(r32[:32])      // r32
+	h.Write(pubkey32[:32]) // pubkey32
+	h.Write(msg[:msglen])  // msg
+
+	// Sum into challengeHash
+	var temp [32]byte
+	h.Sum(temp[:0])
+	copy(challengeHash[:], temp[:])
+
+	// Convert hash to scalar directly
+	var tempScalar Scalar
+	tempScalar.d[0] = uint64(challengeHash[31]) | uint64(challengeHash[30])<<8 | uint64(challengeHash[29])<<16 | uint64(challengeHash[28])<<24 |
+		uint64(challengeHash[27])<<32 | uint64(challengeHash[26])<<40 | uint64(challengeHash[25])<<48 | uint64(challengeHash[24])<<56
+	tempScalar.d[1] = uint64(challengeHash[23]) | uint64(challengeHash[22])<<8 | uint64(challengeHash[21])<<16 | uint64(challengeHash[20])<<24 |
+		uint64(challengeHash[19])<<32 | uint64(challengeHash[18])<<40 | uint64(challengeHash[17])<<48 | uint64(challengeHash[16])<<56
+	tempScalar.d[2] = uint64(challengeHash[15]) | uint64(challengeHash[14])<<8 | uint64(challengeHash[13])<<16 | uint64(challengeHash[12])<<24 |
+		uint64(challengeHash[11])<<32 | uint64(challengeHash[10])<<40 | uint64(challengeHash[9])<<48 | uint64(challengeHash[8])<<56
+	tempScalar.d[3] = uint64(challengeHash[7]) | uint64(challengeHash[6])<<8 | uint64(challengeHash[5])<<16 | uint64(challengeHash[4])<<24 |
+		uint64(challengeHash[3])<<32 | uint64(challengeHash[2])<<40 | uint64(challengeHash[1])<<48 | uint64(challengeHash[0])<<56
+
+	// Check overflow and reduce if needed
+	if tempScalar.checkOverflow() {
+		tempScalar.reduce(1)
+	}
+
+	// Copy back to array
+	e[0], e[1], e[2], e[3] = tempScalar.d[0], tempScalar.d[1], tempScalar.d[2], tempScalar.d[3]
+}
+
+// scalarSetB32 sets scalar from 32 bytes
+func scalarSetB32(r []uint64, bin []byte, overflow *int) {
+	if len(r) < 4 || len(bin) < 32 {
+		if overflow != nil {
+			*overflow = 1
+		}
+		return
+	}
+
+	r[0] = uint64(bin[31]) | uint64(bin[30])<<8 | uint64(bin[29])<<16 | uint64(bin[28])<<24 |
+		uint64(bin[27])<<32 | uint64(bin[26])<<40 | uint64(bin[25])<<48 | uint64(bin[24])<<56
+	r[1] = uint64(bin[23]) | uint64(bin[22])<<8 | uint64(bin[21])<<16 | uint64(bin[20])<<24 |
+		uint64(bin[19])<<32 | uint64(bin[18])<<40 | uint64(bin[17])<<48 | uint64(bin[16])<<56
+	r[2] = uint64(bin[15]) | uint64(bin[14])<<8 | uint64(bin[13])<<16 | uint64(bin[12])<<24 |
+		uint64(bin[11])<<32 | uint64(bin[10])<<40 | uint64(bin[9])<<48 | uint64(bin[8])<<56
+	r[3] = uint64(bin[7]) | uint64(bin[6])<<8 | uint64(bin[5])<<16 | uint64(bin[4])<<24 |
+		uint64(bin[3])<<32 | uint64(bin[2])<<40 | uint64(bin[1])<<48 | uint64(bin[0])<<56
+
+	var tempS Scalar
+	copy(tempS.d[:], r)
+	if overflow != nil {
+		*overflow = boolToInt(tempS.checkOverflow())
+	}
+	if tempS.checkOverflow() {
+		tempS.reduce(1)
+		copy(r, tempS.d[:])
+	}
+}
+
+// feNormalizeVar normalizes field element
+func feNormalizeVar(r []uint64) {
+	if len(r) < 5 {
+		return
+	}
+	var tempFE FieldElement
+	copy(tempFE.n[:], r)
+	fieldNormalize(&tempFE)
+	copy(r, tempFE.n[:])
+}
+
+// feGetB32 serializes field element to 32 bytes
+func feGetB32(b []byte, a []uint64) {
+	if len(b) < 32 || len(a) < 5 {
+		return
+	}
+	var tempFE FieldElement
+	copy(tempFE.n[:], a)
+	fieldGetB32(b, &tempFE)
+}
+
+// scalarNegate negates scalar
+func scalarNegate(r []uint64) {
+	if len(r) < 4 {
+		return
+	}
+
+	// Compute -r mod n: if r == 0 then 0 else n - r
+	if r[0] != 0 || r[1] != 0 || r[2] != 0 || r[3] != 0 {
+		r[0] = (^r[0]) + 1
+		r[1] = ^r[1]
+		r[2] = ^r[2]
+		r[3] = ^r[3]
+
+		// Add n if we wrapped around
+		var tempS Scalar
+		copy(tempS.d[:], r)
+		if tempS.checkOverflow() {
+			r[0] += scalarNC0
+			r[1] += scalarNC1
+			r[2] += scalarNC2
+			r[3] += 0
+		}
+	}
+}
+
+// gejSetGe sets jacobian coordinates from affine
+func gejSetGe(rjx, rjy, rjz []uint64, rjInf *int, ax, ay []uint64, aInf int) {
+	if len(rjx) < 5 || len(rjy) < 5 || len(rjz) < 5 || len(ax) < 5 || len(ay) < 5 {
+		return
+	}
+
+	if aInf != 0 {
+		*rjInf = 1
+		copy(rjx, ax)
+		copy(rjy, ay)
+		rjz[0], rjz[1], rjz[2], rjz[3], rjz[4] = 0, 0, 0, 0, 0
+	} else {
+		*rjInf = 0
+		copy(rjx, ax)
+		copy(rjy, ay)
+		rjz[0], rjz[1], rjz[2], rjz[3], rjz[4] = 1, 0, 0, 0, 0
+	}
+}
+
+// geSetGejVar converts jacobian to affine coordinates
+func geSetGejVar(rx, ry []uint64, rjx, rjy, rjz []uint64, rjInf int, rInf *int) {
+	if len(rx) < 5 || len(ry) < 5 || len(rjx) < 5 || len(rjy) < 5 || len(rjz) < 5 {
+		return
+	}
+
+	if rjInf != 0 {
+		*rInf = 1
+		return
+	}
+
+	*rInf = 0
+
+	// Compute z^-1
+	var zinv [5]uint64
+	fieldInvVar(zinv[:], rjz)
+
+	// Compute z^-2
+	var zinv2 [5]uint64
+	fieldSqr(zinv2[:], zinv[:])
+
+	// x = x * z^-2
+	fieldMul(rx, rjx, zinv2[:])
+
+	// Compute z^-3 = z^-1 * z^-2
+	var zinv3 [5]uint64
+	fieldMul(zinv3[:], zinv[:], zinv2[:])
+
+	// y = y * z^-3
+	fieldMul(ry, rjy, zinv3[:])
+}
+
+// feIsOdd checks if field element is odd
+func feIsOdd(a []uint64) bool {
+	if len(a) < 5 {
+		return false
+	}
+
+	var normalized [5]uint64
+	copy(normalized[:], a)
+	var tempFE FieldElement
+	copy(tempFE.n[:], normalized[:])
+	fieldNormalize(&tempFE)
+	return (tempFE.n[0] & 1) == 1
+}
+
+// ecmult computes r = na * a + ng * G using arrays
+func ecmult(rjx, rjy, rjz []uint64, rjInf *int, ajx, ajy, ajz []uint64, ajInf int, na, ng []uint64) {
+	if len(rjx) < 5 || len(rjy) < 5 || len(rjz) < 5 || len(ajx) < 5 || len(ajy) < 5 || len(ajz) < 5 || len(na) < 4 || len(ng) < 4 {
+		return
+	}
+
+	// Convert arrays to structs for optimized computation
+	var a secp256k1_gej
+	copy(a.x.n[:], ajx)
+	copy(a.y.n[:], ajy)
+	copy(a.z.n[:], ajz)
+	a.infinity = ajInf
+
+	var sna secp256k1_scalar
+	copy(sna.d[:], na)
+
+	var sng secp256k1_scalar
+	copy(sng.d[:], ng)
+
+	var r secp256k1_gej
+	secp256k1_ecmult(&r, &a, &sna, &sng)
+
+	// Convert back to arrays
+	copy(rjx, r.x.n[:])
+	copy(rjy, r.y.n[:])
+	copy(rjz, r.z.n[:])
+	*rjInf = r.infinity
 }
 
 // secp256k1_schnorrsig_verify verifies a Schnorr signature
@@ -1028,7 +1301,10 @@ func secp256k1_schnorrsig_verify(ctx *secp256k1_context, sig64 []byte, msg []byt
 	// Optimize: normalize r.x and rx only once before comparison
 	secp256k1_fe_normalize_var(&r.x)
 	secp256k1_fe_normalize_var(&rx)
-	if !secp256k1_fe_equal(&rx, &r.x) {
+
+	// Direct comparison of normalized field elements to avoid allocations
+	if rx.n[0] != r.x.n[0] || rx.n[1] != r.x.n[1] || rx.n[2] != r.x.n[2] ||
+	   rx.n[3] != r.x.n[3] || rx.n[4] != r.x.n[4] {
 		return 0
 	}
 

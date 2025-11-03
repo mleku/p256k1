@@ -39,6 +39,41 @@ var (
 
 	// ScalarOne represents the scalar 1
 	ScalarOne = Scalar{d: [4]uint64{1, 0, 0, 0}}
+
+	// GLV (Gallant-Lambert-Vanstone) endomorphism constants
+	// lambda is a primitive cube root of unity modulo n (the curve order)
+	secp256k1Lambda = Scalar{d: [4]uint64{
+		0x5363AD4CC05C30E0, 0xA5261C028812645A,
+		0x122E22EA20816678, 0xDF02967C1B23BD72,
+	}}
+
+	// Note: beta is defined in field.go as a FieldElement constant
+
+	// GLV basis vectors and constants for scalar splitting
+	// These are used to decompose scalars for faster multiplication
+	// minus_b1 and minus_b2 are precomputed constants for the GLV splitting algorithm
+	minusB1 = Scalar{d: [4]uint64{
+		0x0000000000000000, 0x0000000000000000,
+		0xE4437ED6010E8828, 0x6F547FA90ABFE4C3,
+	}}
+
+	minusB2 = Scalar{d: [4]uint64{
+		0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF,
+		0x8A280AC50774346D, 0x3DB1562CDE9798D9,
+	}}
+
+	// Precomputed estimates for GLV scalar splitting
+	// g1 and g2 are approximations of b2/d and (-b1)/d respectively
+	// where d is the curve order n
+	g1 = Scalar{d: [4]uint64{
+		0x3086D221A7D46BCD, 0xE86C90E49284EB15,
+		0x3DAA8A1471E8CA7F, 0xE893209A45DBB031,
+	}}
+
+	g2 = Scalar{d: [4]uint64{
+		0xE4437ED6010E8828, 0x6F547FA90ABFE4C4,
+		0x221208AC9DF506C6, 0x1571B4AE8AC47F71,
+	}}
 )
 
 // setInt sets a scalar to a small integer value
@@ -787,5 +822,146 @@ func scalarReduce512(r *Scalar, l []uint64) {
 	if scalarCheckOverflow(r) {
 		scalarReduce(r, 0)
 	}
+}
+
+// wNAF converts a scalar to Windowed Non-Adjacent Form representation
+// wNAF represents the scalar using digits in the range [-(2^(w-1)-1), 2^(w-1)-1]
+// with the property that non-zero digits are separated by at least w-1 zeros.
+//
+// Returns the number of digits in the wNAF representation (at most 257 for 256-bit scalars)
+// and fills the wnaf slice with the digits.
+//
+// The wnaf slice must have at least 257 elements.
+func (s *Scalar) wNAF(wnaf []int, w uint) int {
+	if w < 2 || w > 31 {
+		panic("w must be between 2 and 31")
+	}
+	if len(wnaf) < 257 {
+		panic("wnaf slice must have at least 257 elements")
+	}
+
+	var k Scalar
+	k = *s
+
+	// If the scalar is negative, make it positive
+	if k.getBits(255, 1) == 1 {
+		k.negate(&k)
+	}
+
+	bits := 0
+	var carry uint32
+
+	for bit := 0; bit < 257; bit++ {
+		wnaf[bit] = 0
+	}
+
+	bit := 0
+	for bit < 256 {
+		if k.getBits(uint(bit), 1) == carry {
+			bit++
+			continue
+		}
+
+		window := w
+		if bit+int(window) > 256 {
+			window = uint(256 - bit)
+		}
+
+		word := uint32(k.getBits(uint(bit), window)) + carry
+
+		carry = (word >> (window - 1)) & 1
+		word -= carry << window
+
+		// word is now in range [-(2^(w-1)-1), 2^(w-1)-1]
+		wnaf[bit] = int(word)
+		bits = bit + int(window) - 1
+
+		bit += int(window)
+	}
+
+	return bits + 1
+}
+
+// scalarMulShiftVar computes r = round(a * b / 2^shift) using variable-time arithmetic
+// This is used for the GLV scalar splitting algorithm
+func scalarMulShiftVar(r *Scalar, a *Scalar, b *Scalar, shift uint) {
+	if shift > 512 {
+		panic("shift too large")
+	}
+
+	var l [8]uint64
+	scalarMul512(l[:], a, b)
+
+	// Right shift by 'shift' bits, rounding to nearest
+	carry := uint64(0)
+	if shift > 0 && (l[0]&(uint64(1)<<(shift-1))) != 0 {
+		carry = 1 // Round up if the bit being shifted out is 1
+	}
+
+	// Shift the limbs
+	for i := 0; i < 4; i++ {
+		var srcIndex int
+		var srcShift uint
+		if shift >= 64*uint(i) {
+			srcIndex = int(shift/64) + i
+			srcShift = shift % 64
+		} else {
+			srcIndex = i
+			srcShift = shift
+		}
+
+		if srcIndex >= 8 {
+			r.d[i] = 0
+			continue
+		}
+
+		val := l[srcIndex]
+		if srcShift > 0 && srcIndex+1 < 8 {
+			val |= l[srcIndex+1] << (64 - srcShift)
+		}
+		val >>= srcShift
+
+		if i == 0 {
+			val += carry
+		}
+
+		r.d[i] = val
+	}
+
+	// Ensure result is reduced
+	scalarReduce(r, 0)
+}
+
+// splitLambda splits a scalar k into r1 and r2 such that r1 + lambda*r2 = k mod n
+// where lambda is the secp256k1 endomorphism constant.
+// This is used for GLV (Gallant-Lambert-Vanstone) optimization.
+//
+// The algorithm computes c1 and c2 as approximations, then solves for r1 and r2.
+// r1 and r2 are guaranteed to be in the range [-2^128, 2^128] approximately.
+//
+// Returns r1, r2 where k = r1 + lambda*r2 mod n
+func (r1 *Scalar) splitLambda(r2 *Scalar, k *Scalar) {
+	var c1, c2 Scalar
+
+	// Compute c1 = round(k * g1 / 2^384)
+	// c2 = round(k * g2 / 2^384)
+	// These are high-precision approximations for the GLV basis decomposition
+	scalarMulShiftVar(&c1, k, &g1, 384)
+	scalarMulShiftVar(&c2, k, &g2, 384)
+
+	// Compute r2 = c1*(-b1) + c2*(-b2)
+	var tmp1, tmp2 Scalar
+	scalarMul(&tmp1, &c1, &minusB1)
+	scalarMul(&tmp2, &c2, &minusB2)
+	scalarAdd(r2, &tmp1, &tmp2)
+
+	// Compute r1 = k - r2*lambda
+	scalarMul(r1, r2, &secp256k1Lambda)
+	r1.negate(r1)
+	scalarAdd(r1, r1, k)
+
+	// Ensure the result is properly reduced
+	scalarReduce(r1, 0)
+	scalarReduce(r2, 0)
 }
 

@@ -58,9 +58,9 @@ var (
 		magnitude:  0,
 		normalized: true,
 	}
+
 )
 
-// NewFieldElement creates a new field element
 func NewFieldElement() *FieldElement {
 	return &FieldElement{
 		n:          [5]uint64{0, 0, 0, 0, 0},

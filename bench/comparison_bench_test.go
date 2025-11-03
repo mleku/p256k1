@@ -1,5 +1,5 @@
-//go:build cgo
-// +build cgo
+//go:build !nocgo
+// +build !nocgo
 
 package bench
 
@@ -7,27 +7,18 @@ import (
 	"crypto/rand"
 	"testing"
 
-	p256knext "next.orly.dev/pkg/crypto/p256k"
 	"p256k1.mleku.dev/signer"
 )
 
-// This file contains benchmarks comparing the three signer implementations:
-// 1. P256K1Signer (this package's new port from Bitcoin Core secp256k1)
-// 2. BtcecSigner (pure Go btcec wrapper)
-// 3. NextP256K Signer (CGO version using next.orly.dev/pkg/crypto/p256k)
+// This file contains benchmarks for the P256K1Signer implementation
+// (pure Go port from Bitcoin Core secp256k1)
 
 var (
 	benchSeckey   []byte
 	benchMsghash  []byte
 	compBenchSignerP256K1  *signer.P256K1Signer
-	compBenchSignerBtcec   *signer.BtcecSigner
-	compBenchSignerNext    *p256knext.Signer
 	compBenchSignerP256K12 *signer.P256K1Signer
-	compBenchSignerBtcec2  *signer.BtcecSigner
-	compBenchSignerNext2   *p256knext.Signer
 	compBenchSigP256K1     []byte
-	compBenchSigBtcec      []byte
-	compBenchSigNext       []byte
 )
 
 func initComparisonBenchData() {
@@ -72,30 +63,6 @@ func initComparisonBenchData() {
 		panic(err)
 	}
 
-	// Setup BtcecSigner (pure Go)
-	signer2 := signer.NewBtcecSigner()
-	if err := signer2.InitSec(benchSeckey); err != nil {
-		panic(err)
-	}
-	compBenchSignerBtcec = signer2
-
-	compBenchSigBtcec, err = signer2.Sign(benchMsghash)
-	if err != nil {
-		panic(err)
-	}
-
-	// Setup NextP256K Signer (CGO version)
-	signer3 := &p256knext.Signer{}
-	if err := signer3.InitSec(benchSeckey); err != nil {
-		panic(err)
-	}
-	compBenchSignerNext = signer3
-
-	compBenchSigNext, err = signer3.Sign(benchMsghash)
-	if err != nil {
-		panic(err)
-	}
-
 	// Generate second key pair for ECDH
 	seckey2 := make([]byte, 32)
 	for {
@@ -115,24 +82,10 @@ func initComparisonBenchData() {
 		panic(err)
 	}
 	compBenchSignerP256K12 = signer12
-
-	// BtcecSigner second key pair
-	signer22 := signer.NewBtcecSigner()
-	if err := signer22.InitSec(seckey2); err != nil {
-		panic(err)
-	}
-	compBenchSignerBtcec2 = signer22
-
-	// NextP256K Signer second key pair
-	signer32 := &p256knext.Signer{}
-	if err := signer32.InitSec(seckey2); err != nil {
-		panic(err)
-	}
-	compBenchSignerNext2 = signer32
 }
 
-// BenchmarkPubkeyDerivation compares public key derivation from private key
-func BenchmarkPubkeyDerivation_P256K1(b *testing.B) {
+// BenchmarkPubkeyDerivation benchmarks public key derivation from private key
+func BenchmarkPubkeyDerivation(b *testing.B) {
 	if benchSeckey == nil {
 		initComparisonBenchData()
 	}
@@ -147,38 +100,9 @@ func BenchmarkPubkeyDerivation_P256K1(b *testing.B) {
 	}
 }
 
-func BenchmarkPubkeyDerivation_Btcec(b *testing.B) {
-	if benchSeckey == nil {
-		initComparisonBenchData()
-	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		s := signer.NewBtcecSigner()
-		if err := s.InitSec(benchSeckey); err != nil {
-			b.Fatalf("failed to create signer: %v", err)
-		}
-		_ = s.Pub()
-	}
-}
-
-func BenchmarkPubkeyDerivation_NextP256K(b *testing.B) {
-	if benchSeckey == nil {
-		initComparisonBenchData()
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		s := &p256knext.Signer{}
-		if err := s.InitSec(benchSeckey); err != nil {
-			b.Fatalf("failed to create signer: %v", err)
-		}
-		_ = s.Pub()
-	}
-}
-
-// BenchmarkSign compares Schnorr signing
-func BenchmarkSign_P256K1(b *testing.B) {
+// BenchmarkSign benchmarks Schnorr signing
+func BenchmarkSign(b *testing.B) {
 	if benchSeckey == nil {
 		initComparisonBenchData()
 	}
@@ -195,42 +119,9 @@ func BenchmarkSign_P256K1(b *testing.B) {
 	}
 }
 
-func BenchmarkSign_Btcec(b *testing.B) {
-	if benchSeckey == nil {
-		initComparisonBenchData()
-	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if compBenchSignerBtcec == nil {
-			initComparisonBenchData()
-		}
-		_, err := compBenchSignerBtcec.Sign(benchMsghash)
-		if err != nil {
-			b.Fatalf("failed to sign: %v", err)
-		}
-	}
-}
-
-func BenchmarkSign_NextP256K(b *testing.B) {
-	if benchSeckey == nil {
-		initComparisonBenchData()
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if compBenchSignerNext == nil {
-			initComparisonBenchData()
-		}
-		_, err := compBenchSignerNext.Sign(benchMsghash)
-		if err != nil {
-			b.Fatalf("failed to sign: %v", err)
-		}
-	}
-}
-
-// BenchmarkVerify compares Schnorr verification
-func BenchmarkVerify_P256K1(b *testing.B) {
+// BenchmarkVerify benchmarks Schnorr verification
+func BenchmarkVerify(b *testing.B) {
 	if benchSeckey == nil {
 		initComparisonBenchData()
 	}
@@ -255,58 +146,9 @@ func BenchmarkVerify_P256K1(b *testing.B) {
 	}
 }
 
-func BenchmarkVerify_Btcec(b *testing.B) {
-	if benchSeckey == nil {
-		initComparisonBenchData()
-	}
 
-	if compBenchSignerBtcec == nil || compBenchSigBtcec == nil {
-		initComparisonBenchData()
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		verifier := signer.NewBtcecSigner()
-		if err := verifier.InitPub(compBenchSignerBtcec.Pub()); err != nil {
-			b.Fatalf("failed to create verifier: %v", err)
-		}
-		valid, err := verifier.Verify(benchMsghash, compBenchSigBtcec)
-		if err != nil {
-			b.Fatalf("verification error: %v", err)
-		}
-		if !valid {
-			b.Fatalf("verification failed")
-		}
-	}
-}
-
-func BenchmarkVerify_NextP256K(b *testing.B) {
-	if benchSeckey == nil {
-		initComparisonBenchData()
-	}
-
-	if compBenchSignerNext == nil || compBenchSigNext == nil {
-		initComparisonBenchData()
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		verifier := &p256knext.Signer{}
-		if err := verifier.InitPub(compBenchSignerNext.Pub()); err != nil {
-			b.Fatalf("failed to create verifier: %v", err)
-		}
-		valid, err := verifier.Verify(benchMsghash, compBenchSigNext)
-		if err != nil {
-			b.Fatalf("verification error: %v", err)
-		}
-		if !valid {
-			b.Fatalf("verification failed")
-		}
-	}
-}
-
-// BenchmarkECDH compares ECDH shared secret generation
-func BenchmarkECDH_P256K1(b *testing.B) {
+// BenchmarkECDH benchmarks ECDH shared secret generation
+func BenchmarkECDH(b *testing.B) {
 	if benchSeckey == nil {
 		initComparisonBenchData()
 	}
@@ -323,37 +165,4 @@ func BenchmarkECDH_P256K1(b *testing.B) {
 	}
 }
 
-func BenchmarkECDH_Btcec(b *testing.B) {
-	if benchSeckey == nil {
-		initComparisonBenchData()
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if compBenchSignerBtcec == nil || compBenchSignerBtcec2 == nil {
-			initComparisonBenchData()
-		}
-		_, err := compBenchSignerBtcec.ECDH(compBenchSignerBtcec2.Pub())
-		if err != nil {
-			b.Fatalf("ECDH failed: %v", err)
-		}
-	}
-}
-
-func BenchmarkECDH_NextP256K(b *testing.B) {
-	if benchSeckey == nil {
-		initComparisonBenchData()
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if compBenchSignerNext == nil || compBenchSignerNext2 == nil {
-			initComparisonBenchData()
-		}
-		_, err := compBenchSignerNext.ECDH(compBenchSignerNext2.Pub())
-		if err != nil {
-			b.Fatalf("ECDH failed: %v", err)
-		}
-	}
-}
 

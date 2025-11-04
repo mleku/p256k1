@@ -30,12 +30,12 @@ This report compares three signer implementations for secp256k1 operations:
 
 ## Summary Results
 
-| Operation | P256K1Signer | ~~BtcecSigner~~ | NextP256K | Winner |
+| Operation | P256K1Signer | BtcecSigner | NextP256K | Winner |
 |-----------|-------------|-------------|-----------|--------|
-| **Pubkey Derivation** | 55,091 ns/op | ~~64,177 ns/op~~ | 271,394 ns/op | P256K1 |
-| **Sign** | 29,237 ns/op | ~~225,514 ns/op~~ | 53,015 ns/op | P256K1 (1.8x faster than NextP256K) |
-| **Verify** | 138,127 ns/op | ~~177,622 ns/op~~ | 44,776 ns/op | NextP256K (3.1x faster) |
-| **ECDH** | 103,345 ns/op | ~~129,392 ns/op~~ | 125,835 ns/op | P256K1 (1.2x faster than NextP256K) |
+| **Pubkey Derivation** | 55,091 ns/op | 64,177 ns/op | 271,394 ns/op | P256K1 (14% faster than Btcec) |
+| **Sign** | 29,237 ns/op | 225,514 ns/op | 53,015 ns/op | P256K1 (1.8x faster than NextP256K) |
+| **Verify** | 138,127 ns/op | 177,622 ns/op | 44,776 ns/op | NextP256K (3.1x faster) |
+| **ECDH** | 103,345 ns/op | 129,392 ns/op | 125,835 ns/op | P256K1 (1.2x faster than NextP256K) |
 
 ---
 
@@ -48,15 +48,15 @@ Deriving public key from private key (32 bytes → 32 bytes x-only pubkey).
 | Implementation | Time per op | Memory | Allocations | Speedup vs P256K1 |
 |----------------|-------------|--------|-------------|-------------------|
 | **P256K1Signer** | 55,091 ns/op | 256 B/op | 4 allocs/op | 1.0x (baseline) |
-| ~~**BtcecSigner**~~ | ~~64,177 ns/op~~ | ~~368 B/op~~ | ~~7 allocs/op~~ | Removed |
+| **BtcecSigner** | 64,177 ns/op | 368 B/op | 7 allocs/op | 0.9x slower |
 | **NextP256K** | 271,394 ns/op | 983,394 B/op | 9 allocs/op | 0.2x slower |
 
 **Analysis:**
-- **P256K1 is fastest** after implementing 8-bit byte-based precomputed tables
+- **P256K1 is fastest** (14% faster than Btcec) after implementing 8-bit byte-based precomputed tables
 - **6% improvement** from CPU optimizations (58,383 → 55,091 ns/op)
 - Massive improvement: 4x faster than original implementation (232,922 → 55,091 ns/op)
 - NextP256K is slowest, likely due to CGO overhead for small operations
-- P256K1 has low memory allocation overhead
+- P256K1 has lowest memory allocation overhead (256 B vs 368 B)
 
 ### Signing (Schnorr)
 
@@ -65,14 +65,14 @@ Creating BIP-340 Schnorr signatures (32-byte message → 64-byte signature).
 | Implementation | Time per op | Memory | Allocations | Speedup vs P256K1 |
 |----------------|-------------|--------|-------------|-------------------|
 | **P256K1Signer** | 29,237 ns/op | 576 B/op | 9 allocs/op | 1.0x (baseline) |
-| ~~**BtcecSigner**~~ | ~~225,514 ns/op~~ | ~~2,193 B/op~~ | ~~38 allocs/op~~ | Removed |
+| **BtcecSigner** | 225,514 ns/op | 2,193 B/op | 38 allocs/op | 0.1x slower |
 | **NextP256K** | 53,015 ns/op | 128 B/op | 3 allocs/op | 0.6x slower |
 
 **Analysis:**
 - **P256K1 is fastest** (1.8x faster than NextP256K) after comprehensive CPU optimizations
 - **54% improvement** from optimizations (63,421 → 29,237 ns/op)
 - **47% reduction in allocations** (17 → 9 allocs/op)
-- P256K1 is significantly faster than alternatives
+- P256K1 is 7.7x faster than Btcec
 - Optimizations: precomputed TaggedHash prefixes, eliminated intermediate copies, optimized hash operations
 - NextP256K has lowest memory usage (128 B vs 576 B) but P256K1 is significantly faster
 
@@ -83,12 +83,12 @@ Verifying BIP-340 Schnorr signatures (32-byte message + 64-byte signature).
 | Implementation | Time per op | Memory | Allocations | Speedup vs P256K1 |
 |----------------|-------------|--------|-------------|-------------------|
 | **P256K1Signer** | 138,127 ns/op | 64 B/op | 2 allocs/op | 1.0x (baseline) |
-| ~~**BtcecSigner**~~ | ~~177,622 ns/op~~ | ~~1,120 B/op~~ | ~~18 allocs/op~~ | Removed |
+| **BtcecSigner** | 177,622 ns/op | 1,120 B/op | 18 allocs/op | 0.8x slower |
 | **NextP256K** | 44,776 ns/op | 96 B/op | 2 allocs/op | **3.1x faster** |
 
 **Analysis:**
 - NextP256K is dramatically fastest (3.1x faster), showcasing CGO advantage for verification
-- **P256K1 is the fastest pure Go implementation** after comprehensive optimizations
+- **P256K1 is fastest pure Go implementation** (22% faster than Btcec) after comprehensive optimizations
 - **8% improvement** from CPU optimizations (149,511 → 138,127 ns/op)
 - **78% reduction in allocations** (9 → 2 allocs/op), **89% reduction in memory** (576 → 64 B/op)
 - **Total improvement:** 26% faster than original (186,054 → 138,127 ns/op)
@@ -102,7 +102,7 @@ Generating shared secret using Elliptic Curve Diffie-Hellman.
 | Implementation | Time per op | Memory | Allocations | Speedup vs P256K1 |
 |----------------|-------------|--------|-------------|-------------------|
 | **P256K1Signer** | 103,345 ns/op | 241 B/op | 6 allocs/op | 1.0x (baseline) |
-| ~~**BtcecSigner**~~ | ~~129,392 ns/op~~ | ~~832 B/op~~ | ~~13 allocs/op~~ | Removed |
+| **BtcecSigner** | 129,392 ns/op | 832 B/op | 13 allocs/op | 0.8x slower |
 | **NextP256K** | 125,835 ns/op | 160 B/op | 3 allocs/op | 0.8x slower |
 
 **Analysis:**
@@ -110,7 +110,7 @@ Generating shared secret using Elliptic Curve Diffie-Hellman.
 - **5% improvement** from CPU optimizations (109,068 → 103,345 ns/op)
 - **Total improvement:** 37% faster than original (163,356 → 103,345 ns/op)
 - Optimizations: 6-bit windowed multiplication (increased from 5-bit), optimized field operations
-- P256K1 has good memory usage
+- P256K1 has lowest memory usage (241 B vs 832 B for Btcec)
 
 ---
 
@@ -120,15 +120,19 @@ Generating shared secret using Elliptic Curve Diffie-Hellman.
 
 After comprehensive CPU optimizations:
 - **P256K1Signer** wins in 3 out of 4 operations:
-  - **Pubkey Derivation:** Fastest - **6% improvement**
+  - **Pubkey Derivation:** Fastest (14% faster than Btcec) - **6% improvement**
   - **Signing:** Fastest (1.8x faster than NextP256K) - **54% improvement!**
   - **ECDH:** Fastest (1.2x faster than NextP256K) - **5% improvement**
 - **NextP256K** wins in 1 operation:
-  - **Verification:** Fastest (3.1x faster than P256K1, CGO advantage)
+  - **Verification:** Fastest (3.1x faster than P256K1, CGO advantage) - but P256K1 is 8% faster than before
 
 ### Best Pure Go: P256K1Signer
 
-**P256K1Signer** is the fastest pure Go implementation available.
+For pure Go implementations:
+- **P256K1** wins for key derivation (14% faster than Btcec) - **6% improvement**
+- **P256K1** wins for signing (7.7x faster than Btcec) - **54% improvement!**
+- **P256K1** wins for verification (22% faster than Btcec) - **fastest pure Go!** (**8% improvement**)
+- **P256K1** wins for ECDH (1.25x faster than Btcec) - **fastest pure Go!** (**5% improvement**)
 
 ### Memory Efficiency
 
@@ -136,6 +140,7 @@ After comprehensive CPU optimizations:
 |----------------|-------------------------|-------|
 | **P256K1Signer** | ~270 B avg | Low memory footprint, significantly reduced after optimizations |
 | **NextP256K** | ~300 KB avg | Very efficient, minimal allocations (except pubkey derivation overhead) |
+| **BtcecSigner** | ~1.1 KB avg | Higher allocations, but acceptable |
 
 **Note:** NextP256K shows high memory in pubkey derivation (983 KB) due to one-time CGO initialization overhead, but this is amortized across operations.
 
@@ -156,12 +161,17 @@ After comprehensive CPU optimizations:
 
 ### Use P256K1Signer when:
 - Pure Go is required (no CGO)
-- **Signing performance is critical** (1.8x faster than NextP256K)
+- **Signing performance is critical** (1.8x faster than NextP256K, 7.7x faster than Btcec)
 - **Pubkey derivation, verification, or ECDH performance is critical** (fastest pure Go for all operations!)
 - Lower memory allocations are preferred (64 B for verify, 576 B for sign)
 - You want to avoid external C dependencies
 - You need the best overall pure Go performance
 - **Now competitive with CGO for signing** (faster than NextP256K)
+
+### Use BtcecSigner when:
+- Pure Go is required
+- You're already using btcec in your project
+- Note: P256K1Signer is faster across all operations
 
 ---
 
@@ -198,9 +208,10 @@ The benchmarks demonstrate that:
 
 The choice between implementations depends on your specific requirements:
 - **Maximum verification performance:** Use NextP256K (CGO) - 3.1x faster for verification
-- **Maximum signing performance:** Use P256K1Signer (Pure Go) - 1.8x faster than NextP256K
+- **Maximum signing performance:** Use P256K1Signer (Pure Go) - 1.8x faster than NextP256K, 7.7x faster than Btcec!
 - **Best pure Go performance:** Use P256K1Signer - fastest pure Go for all operations, now competitive with CGO for signing
 - **Best overall performance:** Use P256K1Signer - wins 3 out of 4 operations, fastest overall for signing
+- **Pure Go alternative:** Use BtcecSigner (but P256K1Signer is significantly faster across all operations)
 
 ---
 

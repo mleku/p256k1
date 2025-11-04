@@ -14,8 +14,8 @@ import (
 // (pure Go port from Bitcoin Core secp256k1)
 
 var (
-	benchSeckey   []byte
-	benchMsghash  []byte
+	benchSeckey            []byte
+	benchMsghash           []byte
 	compBenchSignerP256K1  *signer.P256K1Signer
 	compBenchSignerP256K12 *signer.P256K1Signer
 	compBenchSigP256K1     []byte
@@ -100,7 +100,6 @@ func BenchmarkPubkeyDerivation(b *testing.B) {
 	}
 }
 
-
 // BenchmarkSign benchmarks Schnorr signing
 func BenchmarkSign(b *testing.B) {
 	if benchSeckey == nil {
@@ -118,7 +117,6 @@ func BenchmarkSign(b *testing.B) {
 		}
 	}
 }
-
 
 // BenchmarkVerify benchmarks Schnorr verification
 func BenchmarkVerify(b *testing.B) {
@@ -146,7 +144,6 @@ func BenchmarkVerify(b *testing.B) {
 	}
 }
 
-
 // BenchmarkECDH benchmarks ECDH shared secret generation
 func BenchmarkECDH(b *testing.B) {
 	if benchSeckey == nil {
@@ -164,5 +161,3 @@ func BenchmarkECDH(b *testing.B) {
 		}
 	}
 }
-
-
